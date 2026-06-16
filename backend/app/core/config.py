@@ -4,10 +4,10 @@ import json
 
 
 class Settings(BaseSettings):
-    app_name: str = "App Marketing"
+    app_name: str = "adStudioAI"
     debug: bool = False
 
-    database_url: str = "postgresql+asyncpg://marketing_user:marketing_pass@localhost:5432/app_marketing"
+    database_url: str = "postgresql+asyncpg://marketing_user:marketing_pass@localhost:5432/adstudioai"
 
     meta_app_id: str = ""
     meta_app_secret: str = ""

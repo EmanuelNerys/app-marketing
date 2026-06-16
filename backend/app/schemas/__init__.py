@@ -31,6 +31,8 @@ class AccountResponse(BaseModel):
     brand_name: str
     meta_page_id: str
     meta_page_name: Optional[str] = None
+    plan_type: str = "autonomo"
+    onboarding_step: int = 0
     is_active: bool
     created_at: datetime
 
@@ -41,6 +43,21 @@ class AccountResponse(BaseModel):
 class AccountUpdate(BaseModel):
     brand_name: Optional[str] = None
     is_active: Optional[bool] = None
+    onboarding_step: Optional[int] = None
+
+
+class OnboardingStatusResponse(BaseModel):
+    account_id: str
+    brand_name: str
+    page_name: Optional[str] = None
+    plan_type: str
+    onboarding_step: int
+    instagram_connected: bool
+    ad_account_selected: bool
+
+
+class SelectPlanRequest(BaseModel):
+    plan_type: str
 
 
 class AutomationConfigResponse(BaseModel):

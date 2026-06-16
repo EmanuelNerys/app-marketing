@@ -14,3 +14,4 @@ class MetaCallbackResponse(BaseModel):
     account_id: str
     brand_name: str
     page_name: str | None = None
+    onboarding_step: int = 0

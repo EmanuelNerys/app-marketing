@@ -1,4 +1,4 @@
-# App Marketing
+# adStudioAI
 
 SaaS de automação de marketing e captação de leads integrado com as APIs da Meta (Instagram Graph API e Marketing API).
 

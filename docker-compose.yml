@@ -1,5 +1,5 @@
 # ============================================================
-# docker-compose.yml - Ambiente local do App Marketing SaaS
+# docker-compose.yml - Ambiente local do adStudioAI
 # Pronto para evoluir para ECS / Kubernetes
 # ============================================================
 
@@ -10,12 +10,12 @@ services:
   # ---------------------------------------------------------
   postgres:
     image: postgres:17-alpine
-    container_name: app-marketing-db
+    container_name: adstudioai-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-marketing_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marketing_pass}
-      POSTGRES_DB: ${POSTGRES_DB:-app_marketing}
+      POSTGRES_DB: ${POSTGRES_DB:-adstudioai}
     ports:
       - "5432:5432"
     volumes:
@@ -34,7 +34,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: app-marketing-backend
+    container_name: adstudioai-backend
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-marketing_user}:${POSTGRES_PASSWORD:-marketing_pass}@postgres:5432/${POSTGRES_DB:-app_marketing}
@@ -58,7 +58,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: app-marketing-frontend
+    container_name: adstudioai-frontend
     restart: unless-stopped
     ports:
       - "5173:5173"

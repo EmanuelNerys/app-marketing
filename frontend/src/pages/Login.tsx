@@ -8,7 +8,7 @@ export default function Login() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    navigate('/app')
+    navigate('/onboarding')
   }
 
   return (
@@ -18,7 +18,7 @@ export default function Login() {
           <div className="w-14 h-14 bg-brand-600 rounded-xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-brand-600/25">
             <span className="text-2xl font-bold text-white">AM</span>
           </div>
-          <h1 className="text-2xl font-bold text-dark-600">App Marketing</h1>
+          <h1 className="text-2xl font-bold text-dark-600">adStudioAI</h1>
           <p className="text-dark-400 text-sm mt-1">Automação de captação de leads</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-surface-card rounded-2xl border border-dark-50 p-8 space-y-5">

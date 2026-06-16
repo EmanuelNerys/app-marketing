@@ -14,7 +14,7 @@ export default function Sidebar() {
   return (
     <aside className="w-64 bg-dark min-h-screen p-4 flex flex-col border-r border-dark-50">
       <button onClick={() => navigate('/')} className="text-xl font-bold text-white mb-8 px-3 hover:text-brand-400 transition-colors text-left">
-        App Marketing
+        adStudioAI
       </button>
       <nav className="flex flex-col gap-1">
         {links.map((link) => (

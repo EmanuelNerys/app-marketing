@@ -74,8 +74,8 @@ jobs:
 
       - name: Build backend image
         working-directory: backend
-        run: docker build -t app-marketing-backend .
+        run: docker build -t adstudioai-backend .
 
       - name: Build frontend image
         working-directory: frontend
-        run: docker build -t app-marketing-frontend .
+        run: docker build -t adstudioai-frontend .
