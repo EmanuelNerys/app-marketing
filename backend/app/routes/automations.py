@@ -1,0 +1,67 @@
+import logging
+from typing import List
+
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.database import get_db
+from app.models.automation import AutomationConfig
+from app.schemas import AutomationConfigResponse, AutomationConfigUpdate
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/automations", tags=["automations"])
+
+
+@router.get("", response_model=List[AutomationConfigResponse])
+async def list_automations(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationConfig).order_by(AutomationConfig.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.get("/{automation_id}", response_model=AutomationConfigResponse)
+async def get_automation(automation_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationConfig).where(AutomationConfig.id == automation_id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Automação não encontrada")
+    return config
+
+
+@router.put("/{automation_id}", response_model=AutomationConfigResponse)
+async def update_automation(
+    automation_id: str,
+    data: AutomationConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AutomationConfig).where(AutomationConfig.id == automation_id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Automação não encontrada")
+
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(config, field, value)
+
+    await db.flush()
+    await db.refresh(config)
+    return config
+
+
+@router.delete("/{automation_id}")
+async def delete_automation(automation_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(AutomationConfig).where(AutomationConfig.id == automation_id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Automação não encontrada")
+
+    await db.delete(config)
+    await db.flush()
+    return {"detail": "Automação removida"}
