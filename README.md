@@ -1,96 +1,107 @@
 # adStudioAI
 
-SaaS de automação de marketing e captação de leads integrado com as APIs da Meta (Instagram Graph API e Marketing API).
+SaaS completo de marketing com IA para geração de vídeos, automação de leads e integração com Meta (Instagram Graph API e Marketing API).
 
-## Stack
+## 🎯 Visão Geral
+
+**adStudioAI** é uma plataforma SaaS de última geração que combina:
+- 🎬 **Studio de Criação**: Gerador de vídeos com IA para marketing
+- 🤖 **Automação de Leads**: Captura e qualificação automática via Instagram
+- 📊 **Dashboard Inteligente**: Métricas e analytics em tempo real
+- 🔗 **Integração Meta**: Conexão completa com Facebook/Instagram
+
+## Stack Tecnológico
 
 | Camada | Tecnologia |
 |--------|-----------|
-| Backend | Python 3.11 + FastAPI |
+| Backend | Python 3.11 + FastAPI + Async/Await |
 | Banco | PostgreSQL 17 + SQLAlchemy Async + asyncpg |
-| Frontend | React 19 + Vite + Tailwind CSS |
-| Proxy | Nginx (frontend serve assets e faz proxy reverso) |
+| Frontend | React 18 + TypeScript + Vite + Tailwind CSS |
+| API HTTP | Axios com baseURL `/api/v1` |
+| Proxy | Nginx Alpine (serve assets + proxy reverso) |
 | Container | Docker + Docker Compose |
+| Autenticação | OAuth Meta (Facebook/Instagram) |
 
-## Estrutura do Projeto
+## 📁 Estrutura do Projeto
 
 ```
 app-marketing/
-├── docker-compose.yml          # Orquestração local
+├── docker-compose.yml                # Orquestração local (3 containers)
 ├── backend/
-│   ├── Dockerfile               # Multi-stage (build + runtime)
-│   ├── requirements.txt
-│   ├── .env.example
+│   ├── Dockerfile                    # Multi-stage Python
+│   ├── requirements.txt               # Dependências
 │   └── app/
-│       ├── main.py              # FastAPI app + CORS + lifespan
+│       ├── main.py                   # FastAPI app com CORS + lifespan
 │       ├── core/
-│       │   ├── config.py        # Pydantic Settings (env vars)
-│       │   └── database.py      # Async engine + session
+│       │   ├── config.py             # Pydantic Settings (variáveis de env)
+│       │   └── database.py           # Async SQLAlchemy engine
 │       ├── models/
-│       │   ├── account.py       # Contas Meta conectadas
-│       │   ├── lead.py          # Leads capturados
-│       │   └── automation.py    # AutomationConfig, Customer, Sale
+│       │   ├── account.py            # Contas Meta (OAuth)
+│       │   ├── lead.py               # Leads capturados
+│       │   ├── automation.py         # Config de automação
+│       │   └── video.py              # Histórico de vídeos gerados
 │       ├── routes/
-│       │   ├── auth.py          # OAuth Meta (login + callback)
-│       │   ├── webhook.py       # Webhook da Meta (GET verify + POST receive)
-│       │   ├── automation.py    # POST /automation/config
-│       │   ├── dashboard.py     # GET /dashboard (dados agregados)
-│       │   ├── leads.py         # CRUD leads
-│       │   ├── accounts.py      # CRUD contas
-│       │   └── automations.py   # CRUD automações
+│       │   ├── auth.py               # OAuth Meta login/callback
+│       │   ├── webhook.py            # Webhook Meta (verify + receive)
+│       │   ├── automation.py         # Config de automações
+│       │   ├── dashboard.py          # Dados agregados (GET /dashboard)
+│       │   ├── leads.py              # CRUD de leads
+│       │   ├── accounts.py           # CRUD de contas
+│       │   ├── automations.py        # CRUD de automações
+│       │   └── studio.py             # Geração de vídeos com IA
 │       └── schemas/
-│           ├── auth.py
-│           ├── automation.py
-│           └── __init__.py      # Schemas compartilhados + DashboardResponse
+│           ├── auth.py               # Schemas de autenticação
+│           └── automation.py         # Schemas de automação
 └── frontend/
-    ├── Dockerfile               # Multi-stage (Node build + Nginx)
-    ├── nginx.conf               # Proxy reverso /api/ -> backend
-    ├── package.json
-    ├── tailwind.config.js
-    ├── vite.config.ts
+    ├── Dockerfile                    # Multi-stage Node → Nginx
+    ├── nginx.conf                    # Configuração Nginx com proxy
+    ├── package.json                  # Deps: React, TypeScript, Tailwind
+    ├── vite.config.ts               # Vite com HMR
+    ├── tailwind.config.js           # Tema customizado
     ├── tsconfig.json
-    ├── index.html
     └── src/
         ├── main.tsx
-        ├── App.tsx              # Rotas (/, /login, /app/*)
-        ├── index.css
+        ├── App.tsx                   # Rotas (/, /login, /onboarding, /app/*)
         ├── components/
-        │   ├── Layout.tsx       # Sidebar + Outlet
-        │   └── Sidebar.tsx      # Navegação interna
+        │   ├── Layout.tsx            # Layout com Sidebar + Outlet
+        │   └── Sidebar.tsx           # Navegação principal (6 menu items)
         ├── pages/
-        │   ├── Landing.tsx      # Página inicial (marketing + planos)
-        │   ├── Login.tsx        # Tela de login
-        │   ├── Dashboard.tsx    # Dashboard de clientes e faturamento
-        │   ├── ConexaoMeta.tsx  # Conectar conta Facebook/Instagram
-        │   ├── Automacao.tsx    # Configurar automação de leads
-        │   ├── Leads.tsx        # Listagem de leads
-        │   └── Configuracoes.tsx
+        │   ├── Landing.tsx           # Marketing + planos
+        │   ├── Login.tsx             # Login + "Escolher Plano" button
+        │   ├── Onboarding.tsx        # Seleção de plano (4 etapas)
+        │   ├── Dashboard.tsx         # Analytics e métricas
+        │   ├── Studio.tsx            # 🆕 Gerador de vídeos (6 etapas)
+        │   ├── ConexaoMeta.tsx       # Conectar Facebook/Instagram
+        │   ├── Automacao.tsx         # Configurar automação
+        │   ├── Leads.tsx             # Listagem de leads
+        │   └── Configuracoes.tsx     # Configurações da conta
         ├── services/
-        │   └── api.ts           # Axios centralizado
+        │   └── api.ts                # Axios com baseURL `/api/v1`
         └── types/
-            └── index.ts
+            └── index.ts              # TypeScript types
 ```
 
-## Como Rodar
+## 🚀 Como Rodar Localmente
 
 ### Pré-requisitos
 
 - Docker e Docker Compose instalados
+- Git
 
-### Passo a passo
+### Setup Rápido
 
 ```bash
-# 1. Entre na pasta do projeto
+# 1. Clone/entre no projeto
 cd app-marketing
 
-# 2. Crie o arquivo de ambiente
+# 2. Crie arquivo de ambiente (opcional para dev local)
 cp backend/.env.example backend/.env
 
-# 3. Edite o .env com suas credenciais da Meta
-#    META_APP_ID, META_APP_SECRET, META_WEBHOOK_VERIFY_TOKEN
+# 3. Recrie e suba tudo
+docker compose down && docker compose up --build -d
 
-# 4. Suba tudo
-docker compose up --build
+# 4. Aguarde ~10s para os containers ficarem healthy
+docker compose ps
 ```
 
 ### Acessos
@@ -98,15 +109,29 @@ docker compose up --build
 | Serviço | URL |
 |---------|-----|
 | Frontend (Landing) | http://localhost:5173 |
+| Frontend (Login) | http://localhost:5173/login |
+| Frontend (Onboarding) | http://localhost:5173/onboarding |
 | Frontend (App) | http://localhost:5173/app |
-| Login | http://localhost:5173/login |
-| Backend API | http://localhost:5173/api |
-| Swagger | http://localhost:8000/docs |
-| Health Check | http://localhost:5173/health |
+| Frontend (Studio) | http://localhost:5173/app/studio |
+| Backend API | http://localhost:5173/api/v1/* |
+| Backend Docs (Swagger) | http://localhost:8000/docs |
 
-## API - Endpoints
+### Verificar Health
 
-### Autenticação Meta
+```bash
+# Ver status dos containers
+docker compose ps
+
+# Logs do backend
+docker compose logs -f backend
+
+# Logs do frontend
+docker compose logs -f frontend
+```
+
+## 📡 API - Endpoints
+
+### Autenticação
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
@@ -125,6 +150,20 @@ docker compose up --build
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | GET | `/api/v1/dashboard` | Dados agregados (leads, clientes, faturamento, conversão) |
+
+### Studio de Criação (🆕 Gerador de Vídeos com IA)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| POST | `/api/v1/studio/analyze-image` | Analisa imagem com Claude Vision → sugestões de prompts |
+| POST | `/api/v1/studio/generate-video` | Gera vídeo com IA → retorna job_id |
+| GET | `/api/v1/studio/generation-status/{job_id}` | Verifica progresso da geração e URL final |
+| POST | `/api/v1/studio/publish-video` | Publica vídeo no Instagram |
+
+**Observação**: Endpoints de Studio são placeholders. Futuras integrações:
+- **Análise de Imagem**: Claude Vision API
+- **Geração**: Runway / Kling / Pika (com BullMQ job queue)
+- **Publicação**: Instagram Graph API
 
 ### Leads
 
@@ -154,7 +193,7 @@ docker compose up --build
 | PUT | `/api/v1/automations/{id}` | Atualizar configuração |
 | DELETE | `/api/v1/automations/{id}` | Remover configuração |
 
-## Modelos do Banco
+## 🗄️ Modelos do Banco
 
 ### Account
 Conta Meta conectada via OAuth.
@@ -167,6 +206,7 @@ Conta Meta conectada via OAuth.
 | meta_page_name | String | Nome da página |
 | meta_access_token | Text | Token de acesso de longa duração |
 | is_active | Boolean | Se a conta está ativa |
+| created_at | DateTime | Data de criação |
 
 ### Lead
 Lead capturado via Instagram.
@@ -174,7 +214,7 @@ Lead capturado via Instagram.
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | id | UUID | Identificador único |
-| account_id | UUID | Conta relacionada |
+| account_id | UUID | Conta relacionada (FK) |
 | name | String | Nome do lead |
 | instagram_handle | String | @ do Instagram |
 | email | String | Email |
@@ -182,30 +222,44 @@ Lead capturado via Instagram.
 | source | Enum | Origem (instagram_comment, instagram_dm, instagram_form, manual) |
 | status | Enum | Status no funil (new, contacted, qualified, converted, lost) |
 | captured_at | DateTime | Data de captura |
+| updated_at | DateTime | Última atualização |
 
-### AutomationConfig
+### Automation / AutomationConfig
 Configuração de automação por palavra-chave.
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | id | UUID | Identificador único |
-| account_id | UUID | Conta relacionada |
+| account_id | UUID | Conta relacionada (FK) |
 | keyword | String | Palavra-chave para ativar automação |
 | auto_reply_message | Text | Mensagem de resposta automática |
 | is_active | Boolean | Se a automação está ativa |
+| created_at | DateTime | Data de criação |
 
-### Customer
-Cliente convertido a partir de um lead.
+### Video (🆕 Studio)
+Histórico de vídeos gerados no Studio.
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | id | UUID | Identificador único |
-| account_id | UUID | Conta relacionada |
+| account_id | UUID | Conta relacionada (FK) |
+| image_url | String | URL da imagem de entrada |
+| prompt | Text | Prompt do usuário |
+| duration | String | Duração (5s, 10s, 15s, 30s) |
+| format | String | Formato (9:16, 1:1, 16:9) |
+| style | String | Estilo da geração |
+| video_url | String | URL do vídeo final |
+| status | Enum | Status (pending, processing, completed, failed) |
+| published | Boolean | Se foi publicado no Instagram |
+| created_at | DateTime | Data de criação |
+| updated_at | DateTime | Última atualização |
+| id | UUID | Identificador único |
+| account_id | UUID | Conta relacionada (FK) |
 | name | String | Nome do cliente |
 | email | String | Email |
 | phone | String | Telefone |
 | instagram_handle | String | @ do Instagram |
-| lead_id | UUID | Lead de origem |
+| lead_id | UUID | Lead de origem (FK) |
 
 ### Sale
 Venda registrada para um cliente.
@@ -213,20 +267,20 @@ Venda registrada para um cliente.
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | id | UUID | Identificador único |
-| account_id | UUID | Conta relacionada |
-| customer_id | UUID | Cliente relacionado |
+| account_id | UUID | Conta relacionada (FK) |
+| customer_id | UUID | Cliente relacionado (FK) |
 | amount | Float | Valor da venda |
 | description | Text | Descrição |
 | status | String | Status (completed, pending, cancelled) |
 | sold_at | DateTime | Data da venda |
 
-## Variáveis de Ambiente
+## 🔐 Variáveis de Ambiente
 
 ```env
-# PostgreSQL
-DATABASE_URL=postgresql+asyncpg://marketing_user:marketing_pass@postgres:5432/app_marketing
+# Database (PostgreSQL)
+DATABASE_URL=postgresql+asyncpg://marketing_user:marketing_pass@postgres:5432/adstudioai
 
-# Meta OAuth
+# Meta OAuth (Facebook/Instagram)
 META_APP_ID=your_meta_app_id
 META_APP_SECRET=your_meta_app_secret
 META_REDIRECT_URI=http://localhost:8000/api/v1/auth/meta/callback
@@ -235,14 +289,104 @@ META_WEBHOOK_VERIFY_TOKEN=your_webhook_verify_token
 # Security
 SECRET_KEY=change_this_to_a_random_secret_key
 CORS_ORIGINS=["http://localhost:5173"]
+
+# Future: IA APIs
+# CLAUDE_API_KEY=sk-ant-...
+# RUNWAY_API_KEY=...
+# INSTAGRAM_ACCESS_TOKEN=...
 ```
 
-## Configuração do Meta for Developers
+## 🎬 Fluxo de UI
+
+### Página de Login
+```
+Landing Page
+    ↓
+[Escolher Plano] → /onboarding (seleção de plano)
+[Entrar]        → /login (login)
+```
+
+### Página de Onboarding
+4 etapas responsivas:
+1. Escolher plano
+2. Dados da empresa
+3. Conectar Meta (OAuth)
+4. Configurar automação
+
+→ Redireciona para `/app` (Dashboard)
+
+### App Authenticated (com Sidebar)
+Menu de Navegação:
+1. 📊 **Dashboard** - Métricas e analytics
+2. 🎬 **Studio de Criação** - Gerador de vídeos (6 etapas)
+3. 🔗 **Conexão Meta** - Conectar/gerenciar conta
+4. ⚙️ **Automação** - Configurar automações de leads
+5. 👥 **Leads** - Listar e gerenciar leads
+6. ⚡ **Configurações** - Dados da conta
+
+### Studio de Criação (6 Etapas)
+```
+1. Upload Media
+   ↓ (Drag-drop ou file select: JPG/PNG/WebP até 10MB)
+2. Prompt
+   ↓ (Claude Vision gera sugestões, usuário edita)
+3. Config
+   ↓ (Duração, Formato, Estilo)
+4. Generating
+   ↓ (Progress bar animado, 30-90s)
+5. Result
+   ↓ (Player + Download/Refine/Publish)
+6. Publish
+   ↓ (Caption, hashtags, tipo de publicação)
+```
+
+## 📦 Próximos Passos
+
+### Priority 1: Integrações de IA
+- [ ] **Claude Vision API** para análise de imagem no Studio
+  - Endpoint: `POST /api/v1/studio/analyze-image`
+  - Gerar prompts inteligentes baseado na imagem
+  
+- [ ] **Video Generation API** (Runway / Kling / Pika)
+  - Endpoint: `POST /api/v1/studio/generate-video`
+  - Implementar BullMQ job queue para processamento assíncrono
+  - Webhook callbacks para atualizar status
+
+### Priority 2: Instagram Integration
+- [ ] **Instagram Graph API** para publicação de vídeos
+  - Endpoint: `POST /api/v1/studio/publish-video`
+  - OAuth token refresh e validação
+
+### Priority 3: Real-time Updates
+- [ ] **WebSocket** para live generation progress
+  - Substituir polling por conexão WebSocket
+  - Notificações em tempo real
+
+### Priority 4: Database + Persistência
+- [ ] Implementar modelos `Video` e `Customer` no banco
+- [ ] CRUD endpoints para histórico de vídeos
+- [ ] Tracking de créditos/quotas por plano
+
+## 🚀 Deploy
+
+### Docker Compose (Local)
+```bash
+docker compose up --build -d
+```
+
+### Production (Future)
+- Kubernetes manifests
+- CI/CD pipeline (GitHub Actions)
+- Nginx + SSL
+- Backup automático de PostgreSQL
+
+## 📝 Configuração do Meta for Developers
 
 1. Crie um App em https://developers.facebook.com
 2. Adicione o produto **Instagram Graph API**
 3. Configure o redirect OAuth para `http://localhost:8000/api/v1/auth/meta/callback`
-4. Ative o modo "Em Desenvolvimento" para testar localmente
+4. Gere tokens e adicione ao arquivo `.env`
+5. Ative o modo "Em Desenvolvimento" para testes locais
 5. No Webhook, configure a URL de callback para `http://SEU_IP/api/v1/webhook/meta` (use ngrok para ambiente local)
 6. Defina o token de verificação igual ao `META_WEBHOOK_VERIFY_TOKEN`
 7. Inscreva-se nos campos: `comments`, `messaging`

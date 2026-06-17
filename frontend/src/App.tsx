@@ -8,6 +8,7 @@ import ConexaoMeta from './pages/ConexaoMeta'
 import Automacao from './pages/Automacao'
 import Leads from './pages/Leads'
 import Configuracoes from './pages/Configuracoes'
+import Studio from './pages/Studio'
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/onboarding" element={<Onboarding />} />
         <Route element={<Layout />}>
           <Route path="/app" element={<Dashboard />} />
+          <Route path="/app/studio" element={<Studio />} />
           <Route path="/app/conexao" element={<ConexaoMeta />} />
           <Route path="/app/automacao" element={<Automacao />} />
           <Route path="/app/leads" element={<Leads />} />

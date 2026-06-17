@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.routes import auth, webhook, automation, dashboard, leads, accounts, automations
+from app.routes import auth, webhook, automation, dashboard, leads, accounts, automations, studio
 
 logging.basicConfig(level=logging.INFO)
 
@@ -46,3 +46,4 @@ app.include_router(dashboard.router, prefix="/api/v1")
 app.include_router(leads.router, prefix="/api/v1")
 app.include_router(accounts.router, prefix="/api/v1")
 app.include_router(automations.router, prefix="/api/v1")
+app.include_router(studio.router, prefix="/api/v1")

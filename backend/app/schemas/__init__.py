@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -105,6 +105,32 @@ class SaleResponse(BaseModel):
         from_attributes = True
 
 
+class PerformancePoint(BaseModel):
+    date: str
+    impressions: int
+    clicks: int
+    conversions: int
+
+
+class RecentActivity(BaseModel):
+    id: str
+    type: str
+    description: str
+    created_at: datetime
+
+
+class AlertResponse(BaseModel):
+    id: str
+    type: str
+    severity: str
+    title: str
+    description: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class DashboardResponse(BaseModel):
     total_leads: int
     total_customers: int
@@ -114,3 +140,25 @@ class DashboardResponse(BaseModel):
     monthly_revenue: float
     average_ticket: float
     projected_revenue: float
+
+    ads_spent: float = 0.0
+    ads_impressions: int = 0
+    ads_clicks: int = 0
+    ads_ctr: float = 0.0
+    ads_cpm: float = 0.0
+    ads_roas: float = 0.0
+
+    instagram_posts: int = 0
+    instagram_reach: int = 0
+    instagram_engagement: float = 0.0
+    instagram_followers_delta: int = 0
+
+    videos_generated_month: int = 0
+    credits_total: int = 50
+    credits_used: int = 0
+    last_video_title: Optional[str] = None
+    last_video_created_at: Optional[datetime] = None
+
+    performance: List[PerformancePoint] = []
+    recent_activity: List[RecentActivity] = []
+    alerts: List[AlertResponse] = []

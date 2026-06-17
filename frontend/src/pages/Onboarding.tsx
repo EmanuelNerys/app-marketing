@@ -164,7 +164,7 @@ export default function Onboarding() {
 
   function renderStepIndicator() {
     return (
-      <div className="flex items-center justify-center gap-2 mb-12">
+      <div className="flex items-center justify-center gap-2 mb-12 flex-wrap">
         {steps.map((s, i) => (
           <div key={s.num} className="flex items-center gap-2">
             <div

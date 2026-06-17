@@ -43,3 +43,55 @@ export interface AdAccount {
   account_status: number
   currency: string
 }
+
+export interface PerformancePoint {
+  date: string
+  impressions: number
+  clicks: number
+  conversions: number
+}
+
+export interface RecentActivity {
+  id: string
+  type: string
+  description: string
+  created_at: string
+}
+
+export interface AlertItem {
+  id: string
+  type: string
+  severity: string
+  title: string
+  description: string | null
+  created_at: string
+}
+
+export interface DashboardData {
+  total_leads: number
+  total_customers: number
+  new_customers_30d: number
+  conversion_rate: number
+  total_revenue: number
+  monthly_revenue: number
+  average_ticket: number
+  projected_revenue: number
+  ads_spent: number
+  ads_impressions: number
+  ads_clicks: number
+  ads_ctr: number
+  ads_cpm: number
+  ads_roas: number
+  instagram_posts: number
+  instagram_reach: number
+  instagram_engagement: number
+  instagram_followers_delta: number
+  videos_generated_month: number
+  credits_total: number
+  credits_used: number
+  last_video_title: string | null
+  last_video_created_at: string | null
+  performance: PerformancePoint[]
+  recent_activity: RecentActivity[]
+  alerts: AlertItem[]
+}
