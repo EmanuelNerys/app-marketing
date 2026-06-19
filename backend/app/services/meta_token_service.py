@@ -46,6 +46,33 @@ def decrypt_token(encrypted: str) -> str:
         raise ValueError("Token decryption failed — key mismatch or corrupted data") from exc
 
 
+def safe_decrypt_token(token: str) -> str:
+    """
+    Decrypt a token, falling back to returning it as-is for legacy plaintext data
+    already in the database before Fernet was introduced.
+    Only use at read-time for the legacy Account.meta_access_token field.
+    """
+    if not token:
+        return token
+    try:
+        return decrypt_token(token)
+    except (ValueError, RuntimeError):
+        return token
+
+
+def safe_encrypt_token(token: str) -> str:
+    """
+    Encrypt a token, falling back to plaintext if FERNET_KEY is not configured.
+    Only for the legacy Account.meta_access_token field — MetaConnection always
+    requires full encryption via encrypt_token().
+    """
+    try:
+        return encrypt_token(token)
+    except RuntimeError:
+        logger.warning("FERNET_KEY not set — storing legacy token as plaintext")
+        return token
+
+
 # ---------------------------------------------------------------------------
 # Long-lived token exchange
 # ---------------------------------------------------------------------------

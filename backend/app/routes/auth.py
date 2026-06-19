@@ -17,7 +17,7 @@ from app.models.meta_connection import (
 from app.schemas.auth import MetaAuthUrlResponse, MetaCallbackResponse
 from app.schemas import OnboardingStatusResponse, SelectPlanRequest
 from app.services.meta_token_service import (
-    encrypt_token, decrypt_token,
+    encrypt_token, decrypt_token, safe_decrypt_token, safe_encrypt_token,
     exchange_for_long_lived_token,
     create_signed_state, verify_signed_state,
 )
@@ -25,13 +25,28 @@ from app.services.meta_token_service import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Scopes required per provider
+# ---------------------------------------------------------------------------
+# Scope definitions
+#
+# Instagram: uses Facebook Login for Business (facebook.com/dialog/oauth).
+#   "instagram_business_*" scopes belong to Instagram Login (instagram.com/oauth/authorize)
+#   and are INCOMPATIBLE with the Facebook dialog — they return "Invalid Scope".
+#   The correct scopes for multi-tenant SaaS via Business Portfolio are the classic ones below.
+#
+# WhatsApp: the simple OAuth redirect is a placeholder for development/test only.
+#   Production multi-tenant (onboarding third-party WABAs) requires:
+#     1. Inscription in the Meta Tech Provider Program
+#     2. Embedded Signup flow via the Facebook JS SDK (FB.login with a config_id)
+#     3. Receiving WABA data via postMessage, not a redirect callback
+#   TODO: replace PROVIDER_WHATSAPP flow with Embedded Signup after Tech Provider approval.
+# ---------------------------------------------------------------------------
+
 _PROVIDER_SCOPES: dict[str, str] = {
     PROVIDER_INSTAGRAM: (
-        "instagram_business_basic,"
-        "instagram_business_manage_messages,"
-        "instagram_business_manage_comments,"
-        "instagram_business_content_publish,"
+        "instagram_basic,"
+        "instagram_manage_comments,"
+        "instagram_manage_messages,"
+        "instagram_content_publish,"
         "pages_show_list,"
         "pages_read_engagement"
     ),
@@ -259,7 +274,7 @@ async def meta_callback(
     existing = result.scalar_one_or_none()
 
     if existing:
-        existing.meta_access_token = page_access_token
+        existing.meta_access_token = safe_encrypt_token(page_access_token)
         existing.meta_page_name = page_name
         existing.brand_name = fb_user_name
         existing.onboarding_step = 2
@@ -269,7 +284,7 @@ async def meta_callback(
             brand_name=fb_user_name,
             meta_page_id=page_id,
             meta_page_name=page_name,
-            meta_access_token=page_access_token,
+            meta_access_token=safe_encrypt_token(page_access_token),
             onboarding_step=2,
         )
         db.add(account)
@@ -415,11 +430,12 @@ async def list_ad_accounts(
     if not account:
         raise HTTPException(status_code=404, detail="Conta não encontrada")
 
+    token = safe_decrypt_token(account.meta_access_token)
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{settings.meta_graph_url}/{account.meta_page_id}/adaccounts",
             params={
-                "access_token": account.meta_access_token,
+                "access_token": token,
                 "fields": "id,name,account_status,currency,amount_spent",
             },
         )

@@ -117,7 +117,8 @@ export default function Dashboard() {
   const [period, setPeriod] = useState(30)
 
   useEffect(() => {
-    api.get('/dashboard', { params: { account_id: '' } })
+    const accountId = localStorage.getItem('account_id') ?? ''
+    api.get('/dashboard', { params: { account_id: accountId } })
       .then((res) => setData(res.data))
       .catch(() => {})
   }, [])

@@ -73,10 +73,6 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             value = change.get("value", {})
             await _route_change(field, value, account, db)
 
-        # WhatsApp messages arrive under "messages" key (not "changes")
-        for msg_entry in item.get("messages", []):
-            await handle_whatsapp_message(account, msg_entry, db)
-
     return {"status": "received"}
 
 

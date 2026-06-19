@@ -9,6 +9,7 @@ import Automacao from './pages/Automacao'
 import Leads from './pages/Leads'
 import Configuracoes from './pages/Configuracoes'
 import Studio from './pages/Studio'
+import Privacy from './pages/Privacy'
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route element={<Layout />}>
           <Route path="/app" element={<Dashboard />} />
           <Route path="/app/studio" element={<Studio />} />

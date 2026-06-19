@@ -10,6 +10,7 @@ import httpx
 from app.core.database import get_db
 from app.core.config import settings
 from app.models.account import Account
+from app.services.meta_token_service import safe_decrypt_token
 from app.models.lead import Lead
 from app.models.automation import Customer, Sale
 from app.models.video import VideoGeneration, CreditUsage, Alert
@@ -80,7 +81,7 @@ async def get_dashboard(
         account = result.scalar_one_or_none()
 
         if account and account.meta_access_token:
-            token = account.meta_access_token
+            token = safe_decrypt_token(account.meta_access_token)
             page_id = account.meta_page_id
 
             async with httpx.AsyncClient() as client:
