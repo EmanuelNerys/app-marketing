@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.routes import auth, webhook, automation, dashboard, leads, accounts, automations, studio
+import app.models.meta_connection  # noqa: F401 — registers MetaConnection with Base.metadata
 
 logging.basicConfig(level=logging.INFO)
 

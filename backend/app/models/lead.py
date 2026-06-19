@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Text, DateTime, Enum as SAEnum
+from sqlalchemy import String, Text, DateTime, Enum as SAEnum, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -31,7 +31,7 @@ class Lead(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     account_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, index=True
+        String(36), ForeignKey("accounts.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=True)
     instagram_handle: Mapped[str] = mapped_column(

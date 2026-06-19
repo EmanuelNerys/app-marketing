@@ -11,11 +11,27 @@ class Settings(BaseSettings):
 
     meta_app_id: str = ""
     meta_app_secret: str = ""
+    meta_api_version: str = "v21.0"
     meta_redirect_uri: str = "http://localhost:8000/api/v1/auth/meta/callback"
     meta_webhook_verify_token: str = ""
 
+    # Fernet key for encrypting access tokens at rest.
+    # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    fernet_key: str = ""
+
+    # Optional: n8n webhook URL for event dispatching
+    n8n_webhook_url: str = ""
+
     secret_key: str = "change_this_to_a_random_secret_key"
     cors_origins: str = '["http://localhost:5173"]'
+
+    @property
+    def meta_graph_url(self) -> str:
+        return f"https://graph.facebook.com/{self.meta_api_version}"
+
+    @property
+    def meta_dialog_url(self) -> str:
+        return f"https://www.facebook.com/{self.meta_api_version}/dialog/oauth"
 
     @property
     def cors_origins_list(self) -> List[str]:
