@@ -2,6 +2,8 @@ import hashlib
 import hmac
 import json
 import logging
+import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,10 +12,13 @@ import httpx
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.ws_manager import ws_manager
 from app.models.account import Account
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.automation import AutomationConfig
-from app.models.meta_connection import MetaConnection, PROVIDER_INSTAGRAM, STATUS_ACTIVE
+from app.models.meta_connection import MetaConnection, PROVIDER_INSTAGRAM, PROVIDER_WHATSAPP, STATUS_ACTIVE
+from app.models.conversation import Conversation
+from app.models.message import Message
 from app.services import instagram_service
 from app.services.meta_token_service import safe_decrypt_token, decrypt_token
 
@@ -60,20 +65,30 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 
     logger.info("Webhook received: %s", payload)
 
-    for item in payload.get("entry", []):
-        page_id = item.get("id")
-        if not page_id:
-            continue
+    obj = payload.get("object", "")
 
-        account = await _resolve_tenant_by_page_id(page_id, db)
-        if not account:
-            logger.warning("No tenant found for page_id=%s", page_id)
-            continue
+    for item in payload.get("entry", []):
+        entry_id = item.get("id", "")
 
         for change in item.get("changes", []):
             field = change.get("field")
             value = change.get("value", {})
-            await _route_change(field, value, account, db)
+
+            if obj == "whatsapp_business_account" or field == "messages":
+                # WhatsApp Cloud API: route by phone_number_id inside metadata
+                phone_number_id = value.get("metadata", {}).get("phone_number_id") or entry_id
+                conn, account = await _resolve_wpp_tenant(phone_number_id, db)
+                if not account:
+                    logger.warning("No WPP tenant for phone_number_id=%s", phone_number_id)
+                    continue
+                await handle_whatsapp_message(conn, account, value, db)
+            else:
+                # Instagram / other Meta apps: route by page_id (entry.id)
+                account = await _resolve_tenant_by_page_id(entry_id, db)
+                if not account:
+                    logger.warning("No IG tenant for page_id=%s", entry_id)
+                    continue
+                await _route_change(field, value, account, db)
 
     return {"status": "received"}
 
@@ -196,12 +211,155 @@ async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
 
 
 # ---------------------------------------------------------------------------
-# WhatsApp handler (placeholder — fluxo real requer Embedded Signup)
+# WhatsApp Cloud API handler
 # ---------------------------------------------------------------------------
 
-async def handle_whatsapp_message(account: Account, value: dict, db: AsyncSession):
-    logger.info("WhatsApp message for account %s: %s", account.id, value)
-    await dispatch_event("whatsapp_message", account.id, value)
+async def handle_whatsapp_message(
+    conn: MetaConnection,
+    account: Account,
+    value: dict,
+    db: AsyncSession,
+):
+    """
+    Payload structure (Cloud API):
+    {
+      "messaging_product": "whatsapp",
+      "metadata": {"display_phone_number": "...", "phone_number_id": "..."},
+      "contacts": [{"profile": {"name": "..."}, "wa_id": "55..."}],
+      "messages": [{"from": "55...", "id": "wamid...", "timestamp": "...",
+                    "text": {"body": "..."}, "type": "text"}],
+      "statuses": [{"id": "wamid...", "status": "delivered", ...}]
+    }
+    """
+    tenant_id = account.id
+
+    # ---- Delivery/read status updates ----
+    for status_evt in value.get("statuses", []):
+        wamid = status_evt.get("id")
+        new_status = status_evt.get("status")  # sent/delivered/read/failed
+        pricing = status_evt.get("pricing", {})
+        category = pricing.get("category", "").lower()  # marketing/utility/service/authentication
+
+        if wamid and new_status:
+            result = await db.execute(select(Message).where(Message.message_id == wamid))
+            msg = result.scalar_one_or_none()
+            if msg:
+                msg.status = new_status
+                if category and pricing.get("billable"):
+                    msg.meta_category = category
+                await ws_manager.broadcast(tenant_id, "message_status_updated",
+                                           {"message_id": wamid, "status": new_status,
+                                            "conversation_id": msg.conversation_id})
+        # Increment monthly counters
+        if category and pricing.get("billable"):
+            if category == "marketing":
+                conn.conv_count_marketing = (conn.conv_count_marketing or 0) + 1
+            elif category == "utility":
+                conn.conv_count_utility = (conn.conv_count_utility or 0) + 1
+            elif category == "service":
+                conn.conv_count_service = (conn.conv_count_service or 0) + 1
+            elif category == "authentication":
+                conn.conv_count_auth = (conn.conv_count_auth or 0) + 1
+
+    # ---- Incoming messages ----
+    contacts = {c["wa_id"]: c.get("profile", {}).get("name") for c in value.get("contacts", [])}
+
+    for msg_data in value.get("messages", []):
+        wa_from = msg_data.get("from", "")
+        wamid = msg_data.get("id", "")
+        msg_type = msg_data.get("type", "text")
+        timestamp = int(msg_data.get("timestamp", 0))
+
+        # Extract text/caption depending on type
+        text_body: str | None = None
+        media_type: str | None = None
+        media_id: str | None = None
+
+        if msg_type == "text":
+            text_body = msg_data.get("text", {}).get("body")
+        elif msg_type in ("image", "video", "audio", "document", "sticker"):
+            media_type = msg_type
+            text_body = msg_data.get(msg_type, {}).get("caption")
+            media_id = msg_data.get(msg_type, {}).get("id")
+        elif msg_type == "interactive":
+            # Button reply or list reply
+            interactive = msg_data.get("interactive", {})
+            if interactive.get("type") == "button_reply":
+                text_body = interactive["button_reply"].get("title")
+            elif interactive.get("type") == "list_reply":
+                text_body = interactive["list_reply"].get("title")
+
+        # Upsert lead (wa_id as instagram_handle for now)
+        lead = await _find_lead(tenant_id, wa_from, db)
+        if not lead:
+            customer_name = contacts.get(wa_from)
+            lead = Lead(
+                id=str(uuid.uuid4()),
+                account_id=tenant_id,
+                instagram_handle=wa_from,
+                name=customer_name,
+                source=LeadSource.INSTAGRAM_DM,
+                status=LeadStatus.NEW,
+            )
+            db.add(lead)
+            await db.flush()
+
+        # Find or create conversation for this wa_id
+        conv = await _get_or_create_wpp_conversation(tenant_id, lead.id, db)
+
+        # Save message
+        msg = Message(
+            tenant_id=tenant_id,
+            conversation_id=conv.id,
+            sender=wa_from,
+            text=text_body,
+            direction="inbound",
+            wa_id=wa_from,
+            status="delivered",
+            message_id=wamid,
+            media_type=media_type,
+            payload=msg_data,
+            is_within_24h_window=True,
+            created_at=datetime.fromtimestamp(timestamp, tz=timezone.utc) if timestamp else datetime.now(timezone.utc),
+        )
+        db.add(msg)
+
+        # Update conversation unread count + last_updated
+        conv.unread_count = (conv.unread_count or 0) + 1
+        conv.last_updated = datetime.now(timezone.utc)
+        conv.atendimento_status = "aberto"
+        await db.flush()
+        await db.refresh(msg)
+
+        # Mark as read at Meta (best-effort)
+        try:
+            token = decrypt_token(conn.access_token_encrypted)
+            from app.services import whatsapp_service
+            await whatsapp_service.mark_as_read(token, conn.phone_number_id, wamid)
+        except Exception as exc:
+            logger.debug("mark_as_read failed: %s", exc)
+
+        # Broadcast to connected frontend clients
+        await ws_manager.broadcast(tenant_id, "new_message", {
+            "id": msg.id,
+            "conversation_id": conv.id,
+            "wa_id": wa_from,
+            "sender": wa_from,
+            "text": text_body,
+            "media_type": media_type,
+            "direction": "inbound",
+            "status": "delivered",
+            "message_id": wamid,
+            "created_at": msg.created_at.isoformat(),
+        })
+        await ws_manager.broadcast(tenant_id, "conversation_updated", {
+            "id": conv.id,
+            "unread_count": conv.unread_count,
+            "atendimento_status": conv.atendimento_status,
+            "last_updated": conv.last_updated.isoformat(),
+        })
+
+        await dispatch_event("whatsapp_message", tenant_id, msg_data)
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +390,51 @@ def _verify_signature(body: bytes, signature_header: str) -> bool:
         settings.meta_app_secret.encode(), body, hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(actual, expected)
+
+
+async def _resolve_wpp_tenant(
+    phone_number_id: str, db: AsyncSession
+) -> tuple[MetaConnection | None, Account | None]:
+    """Find tenant by WhatsApp phone_number_id stored in meta_connections."""
+    result = await db.execute(
+        select(MetaConnection).where(
+            MetaConnection.phone_number_id == phone_number_id,
+            MetaConnection.provider == PROVIDER_WHATSAPP,
+            MetaConnection.status == STATUS_ACTIVE,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        return None, None
+    acc_result = await db.execute(select(Account).where(Account.id == conn.account_id))
+    return conn, acc_result.scalar_one_or_none()
+
+
+async def _get_or_create_wpp_conversation(
+    tenant_id: str, customer_id: str, db: AsyncSession
+) -> Conversation:
+    """Return existing open conversation for this customer or create a new one."""
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.tenant_id == tenant_id,
+            Conversation.customer_id == customer_id,
+            Conversation.status == "active",
+        ).order_by(Conversation.last_updated.desc()).limit(1)
+    )
+    conv = result.scalar_one_or_none()
+    if conv:
+        return conv
+    conv = Conversation(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
+        customer_id=customer_id,
+        atendimento_status="aberto",
+        status="active",
+        unread_count=0,
+    )
+    db.add(conv)
+    await db.flush()
+    return conv
 
 
 async def _resolve_tenant_by_page_id(page_id: str, db: AsyncSession) -> Account | None:

@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     n8n_webhook_url: str = ""
 
     secret_key: str = "change_this_to_a_random_secret_key"
+    jwt_algorithm: str = "HS256"
+    jwt_access_expire_minutes: int = 60
+    jwt_refresh_expire_days: int = 30
     cors_origins: str = '["http://localhost:5173"]'
 
     @property

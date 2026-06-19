@@ -1,19 +1,6 @@
 # adStudioAI
 
-SaaS multi-tenant de gestão de marketing com integração completa Meta (Instagram, WhatsApp Business e Meta Ads).
-
----
-
-## Visão Geral
-
-**adStudioAI** é uma plataforma SaaS que permite a donos de negócio conectarem suas próprias contas Meta ao produto via OAuth e gerenciá-las de forma independente. Cada cliente é um **tenant** isolado.
-
-| Módulo | O que faz |
-|---|---|
-| **Meta Integration** | OAuth multi-provider (Instagram, WhatsApp, Ads), tokens criptografados, webhooks com validação HMAC |
-| **Studio de Criação** | Gerador de vídeos com IA (fluxo de 6 etapas) |
-| **Automação de Leads** | Captura e resposta automática via Instagram |
-| **Dashboard** | Métricas de leads, faturamento, ads e Instagram em tempo real |
+SaaS multi-tenant de gestão de WhatsApp Business + Instagram + Meta Ads com autenticação JWT, WebSocket em tempo real e integração completa com a Meta Cloud API.
 
 ---
 
@@ -24,108 +11,63 @@ SaaS multi-tenant de gestão de marketing com integração completa Meta (Instag
 | Backend | Python 3.11 + FastAPI (async) |
 | Banco | PostgreSQL 17 + SQLAlchemy 2.0 async + asyncpg |
 | Frontend | React 19 + TypeScript + Vite + Tailwind CSS |
-| HTTP Client | Axios (baseURL `/api/v1`) |
+| Auth | JWT (python-jose) + bcrypt |
+| WebSocket | FastAPI WebSocket nativo |
 | Containers | Docker + Docker Compose |
 | Criptografia | Fernet (cryptography) para tokens em repouso |
 | Testes | pytest + pytest-asyncio + SQLite in-memory |
-| Automações | n8n (via webhook dispatch) |
+| Túnel local | ngrok (testes com webhook Meta) |
 
 ---
 
-## Estrutura do Projeto
-
-```
-app-marketing/
-├── docker-compose.yml            # PostgreSQL + Backend + Frontend
-├── backend/
-│   ├── requirements.txt
-│   ├── pytest.ini
-│   ├── tests/
-│   │   ├── conftest.py           # SQLite in-memory + dependency override
-│   │   ├── test_webhook.py       # Assinatura HMAC, challenge, payload
-│   │   ├── test_auth.py          # State assinado, connections endpoints
-│   │   └── test_tenant.py        # Isolamento por account_id
-│   └── app/
-│       ├── main.py               # FastAPI app, CORS, lifespan (create_all)
-│       ├── core/
-│       │   ├── config.py         # Pydantic Settings (todas as env vars)
-│       │   └── database.py       # Async engine + get_db dependency
-│       ├── models/
-│       │   ├── account.py        # Tenant principal (OAuth legacy)
-│       │   ├── meta_connection.py # Conexões por provider (NOVO)
-│       │   ├── lead.py           # Leads capturados
-│       │   ├── automation.py     # AutomationConfig, Customer, Sale
-│       │   └── video.py          # VideoGeneration, CreditUsage, Alert
-│       ├── routes/
-│       │   ├── auth.py           # OAuth Meta (start, callback, connections)
-│       │   ├── webhook.py        # Webhook Meta (verify + receive + dispatch)
-│       │   ├── dashboard.py      # GET /dashboard (métricas agregadas)
-│       │   ├── leads.py          # CRUD leads
-│       │   ├── accounts.py       # CRUD accounts
-│       │   ├── automations.py    # CRUD automations
-│       │   ├── automation.py     # POST /automation/config
-│       │   └── studio.py         # Geração e publicação de vídeos
-│       ├── services/
-│       │   ├── meta_token_service.py  # Fernet, long-lived token, state HMAC (NOVO)
-│       │   ├── instagram_service.py   # DM, comentário, publicação, mídia (NOVO)
-│       │   ├── whatsapp_service.py    # Texto, template, mark_as_read (NOVO)
-│       │   └── ads_service.py         # Campanhas, ad sets, insights (NOVO)
-│       └── schemas/
-│           ├── auth.py
-│           └── automation.py
-└── frontend/
-    └── src/
-        ├── App.tsx               # Rotas (/, /login, /onboarding, /app/*)
-        ├── pages/
-        │   ├── Landing.tsx
-        │   ├── Login.tsx
-        │   ├── Onboarding.tsx
-        │   ├── Dashboard.tsx
-        │   ├── Studio.tsx
-        │   ├── ConexaoMeta.tsx   # 3 provider cards + status + disconnect (ATUALIZADO)
-        │   ├── Automacao.tsx
-        │   ├── Leads.tsx
-        │   └── Configuracoes.tsx
-        └── services/
-            └── api.ts            # Axios com baseURL /api/v1
-```
-
----
-
-## Como Rodar Localmente
+## Como rodar localmente
 
 ### Pré-requisitos
 
-- Docker e Docker Compose
-- Python 3.11+ (apenas para gerar o `FERNET_KEY`)
+- Docker + Docker Compose instalados
+- Python 3.11+ (só para gerar o `FERNET_KEY`)
+- ngrok instalado ([ngrok.com/download](https://ngrok.com/download))
 
-### 1. Copie e preencha o `.env`
+---
+
+### 1. Clone e configure o `.env`
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-Gere um `FERNET_KEY`:
-
-```bash
-pip install cryptography
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-Cole a chave gerada em `backend/.env`:
+Edite `backend/.env` com os valores abaixo:
 
 ```env
-FERNET_KEY=<chave_gerada_aqui>
-```
+# PostgreSQL (não mude — já está configurado no docker-compose)
+DATABASE_URL=postgresql+asyncpg://marketing_user:marketing_pass@localhost:5432/adstudioai
 
-Preencha também as credenciais Meta:
-
-```env
+# Meta / Facebook Graph API
 META_APP_ID=seu_app_id
 META_APP_SECRET=seu_app_secret
-META_WEBHOOK_VERIFY_TOKEN=um_token_secreto_qualquer
-SECRET_KEY=uma_string_aleatoria_longa
+META_API_VERSION=v21.0
+META_REDIRECT_URI=https://ngoc-subumbellate-jayce.ngrok-free.dev/api/v1/auth/meta/callback
+META_WEBHOOK_VERIFY_TOKEN=adstudioai_webhook_2024
+
+# Criptografia de tokens (obrigatório — gere uma chave única)
+# python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+FERNET_KEY=sua_chave_fernet_aqui
+
+# JWT
+SECRET_KEY=uma_string_aleatoria_longa_e_segura
+
+# CORS
+CORS_ORIGINS=["http://localhost:5173","https://ngoc-subumbellate-jayce.ngrok-free.dev"]
+
+# ngrok (túnel para testes com Meta webhook)
+NGROK_AUTHTOKEN=34UhOfU7kacd1lnqQrSEoHEic7H_7NgzRUeGJp97zi9KbSBet
+NGROK_DOMAIN=ngoc-subumbellate-jayce.ngrok-free.dev
+
+# n8n (opcional — se vazio, eventos são apenas logados)
+N8N_WEBHOOK_URL=
 ```
+
+---
 
 ### 2. Suba os containers
 
@@ -133,230 +75,254 @@ SECRET_KEY=uma_string_aleatoria_longa
 docker compose up --build -d
 ```
 
-### 3. Acesse
+Aguarda subir tudo (~30s na primeira vez). Verifique:
+
+```bash
+docker compose ps
+```
+
+Todos devem estar `healthy` ou `Up`.
+
+---
+
+### 3. Abra o ngrok (terminal separado — deixe aberto)
+
+```bash
+# Adicione o authtoken uma única vez
+ngrok config add-authtoken 34UhOfU7kacd1lnqQrSEoHEic7H_7NgzRUeGJp97zi9KbSBet
+
+# Sobe o túnel
+ngrok http --url=ngoc-subumbellate-jayce.ngrok-free.dev 8000
+```
+
+---
+
+### 4. Acesse
 
 | Serviço | URL |
 |---|---|
 | Frontend | http://localhost:5173 |
 | Backend API | http://localhost:8000 |
 | Swagger docs | http://localhost:8000/docs |
+| API pública (ngrok) | https://ngoc-subumbellate-jayce.ngrok-free.dev |
 
 ---
 
-## Variáveis de Ambiente
+### 5. Configure o webhook no Meta for Developers
 
-```env
-# PostgreSQL
-DATABASE_URL=postgresql+asyncpg://marketing_user:marketing_pass@localhost:5432/adstudioai
+1. Acesse [developers.facebook.com](https://developers.facebook.com) → seu App → WhatsApp → Configuração
+2. **Webhook URL:** `https://ngoc-subumbellate-jayce.ngrok-free.dev/api/v1/webhook/meta`
+3. **Verify Token:** `adstudioai_webhook_2024`
+4. Clique em **Verificar e salvar**
+5. Assine o campo **messages**
 
-# Meta / Facebook Graph API
-META_APP_ID=your_meta_app_id
-META_APP_SECRET=your_meta_app_secret
-META_API_VERSION=v21.0                  # centralizado — mude aqui para upgrade
-META_REDIRECT_URI=http://localhost:8000/api/v1/auth/meta/callback
-META_WEBHOOK_VERIFY_TOKEN=your_token
+---
 
-# Criptografia de tokens em repouso (obrigatório)
-FERNET_KEY=your_fernet_key
+## Primeiro uso — criar conta e testar
 
-# n8n (opcional — se vazio, eventos são apenas logados)
-N8N_WEBHOOK_URL=
+```bash
+# 1. Registrar tenant + usuário admin
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"brand_name":"Minha Empresa","username":"admin","password":"senha123"}'
 
-# App
-SECRET_KEY=change_this_to_a_random_secret_key
-CORS_ORIGINS=["http://localhost:5173"]
+# 2. Login
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"senha123"}'
+# → retorna access_token e refresh_token
+
+# 3. Configurar credenciais WhatsApp
+curl -X PUT http://localhost:8000/api/v1/whatsapp/credentials \
+  -H "Authorization: Bearer SEU_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone_number_id": "SEU_PHONE_NUMBER_ID",
+    "phone_number": "+55 83 99999-9999",
+    "waba_id": "SEU_WABA_ID",
+    "access_token": "SEU_SYSTEM_USER_TOKEN"
+  }'
 ```
 
 ---
 
 ## API — Endpoints
 
-### Autenticação e Conexões Meta
+### Auth JWT
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/api/v1/auth/meta/login` | URL OAuth com scopes legados (onboarding) |
-| GET | `/api/v1/auth/meta/start?account_id=&provider=` | URL OAuth por provider com state HMAC assinado |
-| GET | `/api/v1/auth/meta/callback` | Troca código, obtém long-lived token, persiste MetaConnection |
-| GET | `/api/v1/auth/meta/connections?account_id=` | Lista conexões ativas do tenant |
-| DELETE | `/api/v1/auth/meta/connections/{id}?account_id=` | Revoga token e remove conexão |
-| GET | `/api/v1/auth/meta/ad-accounts?account_id=` | Lista ad accounts da conta |
-| GET | `/api/v1/auth/onboarding/status?account_id=` | Status do onboarding |
-| POST | `/api/v1/auth/onboarding/plan?account_id=` | Seleciona plano |
-| POST | `/api/v1/auth/onboarding/complete-step?account_id=&step=` | Marca etapa como concluída |
+| POST | `/api/v1/auth/register` | Cria tenant + usuário admin. Retorna tokens |
+| POST | `/api/v1/auth/login` | `{username, password}` → `{access_token, refresh_token}` |
+| POST | `/api/v1/auth/refresh` | Renova access_token com refresh_token |
+| GET | `/api/v1/auth/me` | Retorna usuário autenticado |
+| POST | `/api/v1/auth/users` | Admin cria agente no tenant |
+| GET | `/api/v1/auth/users` | Lista usuários do tenant |
 
-**Providers aceitos em `/auth/meta/start`:** `instagram` · `whatsapp` · `ads`
+Todas as rotas protegidas exigem `Authorization: Bearer <access_token>`.
+
+---
+
+### WhatsApp Business
+
+| Método | Rota | Descrição |
+|---|---|---|
+| PUT | `/api/v1/whatsapp/credentials` | Admin configura phone_id, waba_id, token |
+| GET | `/api/v1/whatsapp/credentials` | Consulta conexão atual |
+| POST | `/api/v1/whatsapp/send` | Envia texto livre (janela de 24h) |
+| POST | `/api/v1/whatsapp/send-template` | Envia template aprovado (fora da janela) |
+| GET | `/api/v1/whatsapp/templates` | Lista templates do cache local |
+| POST | `/api/v1/whatsapp/templates/sync` | Sincroniza templates da Meta API |
+| POST | `/api/v1/whatsapp/templates` | Cria template para aprovação |
+| DELETE | `/api/v1/whatsapp/templates/{name}` | Deleta template |
+| GET | `/api/v1/whatsapp/stats` | Contadores mensais (marketing/utility/service/auth) |
+
+---
+
+### Conversas
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/api/v1/conversations` | Lista conversas do tenant (filtra por status, atendente) |
+| POST | `/api/v1/conversations` | Cria conversa |
+| GET | `/api/v1/conversations/{id}` | Detalhe |
+| PATCH | `/api/v1/conversations/{id}` | Atualiza status, atendente, unread_count |
+| DELETE | `/api/v1/conversations/{id}` | Remove |
+
+---
+
+### Mensagens
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/api/v1/conversations/{id}/messages` | Lista mensagens (paginado, ordem cronológica) |
+| POST | `/api/v1/conversations/{id}/messages` | Salva mensagem (uso interno / testes) |
+| PATCH | `/api/v1/conversations/{id}/messages/{msg_id}/status` | Atualiza status (delivered/read/failed) |
+
+---
+
+### WebSocket — tempo real
+
+```
+ws://localhost:8000/ws?token=<access_token>
+```
+
+**Eventos recebidos pelo frontend:**
+
+| Evento | Quando dispara |
+|---|---|
+| `new_message` | Nova mensagem inbound (webhook) ou outbound (agente) |
+| `message_status_updated` | Atualização de status (delivered, read, failed) |
+| `conversation_created` | Nova conversa criada |
+| `conversation_updated` | unread_count, status ou atendente atualizados |
+
+Cada tenant recebe apenas seus próprios eventos. Keepalive: envie `ping` → responde `pong`.
+
+---
 
 ### Webhook Meta
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/api/v1/webhook/meta` | Verificação do challenge (`hub.mode`, `hub.verify_token`, `hub.challenge`) |
-| POST | `/api/v1/webhook/meta` | Recebe eventos — valida `X-Hub-Signature-256` antes de processar |
+| GET | `/api/v1/webhook/meta` | Verificação de challenge (Meta valida o endpoint) |
+| POST | `/api/v1/webhook/meta` | Recebe eventos (valida `X-Hub-Signature-256` antes de qualquer processamento) |
 
-O webhook roteia por tipo de evento:
+**Roteamento automático:**
+- `object=whatsapp_business_account` → roteia por `phone_number_id` → cria Lead + Conversa + Message + broadcast WS
+- `object=instagram` → roteia por `page_id` → captura lead + auto-reply por keyword
 
-| Evento | Handler | Dispatch |
-|---|---|---|
-| `changes[].field == "comments"` | `handle_ig_comment()` | `dispatch_event("ig_comment", ...)` |
-| `changes[].field == "messaging"` | `handle_ig_dm()` | `dispatch_event("ig_dm", ...)` |
-| `messages[]` (WhatsApp) | `handle_whatsapp_message()` | `dispatch_event("whatsapp_message", ...)` |
+---
 
-`dispatch_event()` envia para o `N8N_WEBHOOK_URL` se configurado, caso contrário apenas loga.
-
-### Dashboard
+### Meta OAuth (Instagram / Ads)
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/api/v1/dashboard?account_id=` | Leads, faturamento, ads, Instagram, vídeos, alertas |
+| GET | `/api/v1/auth/meta/start?provider=` | Gera URL OAuth com state HMAC assinado |
+| GET | `/api/v1/auth/meta/callback` | Troca code → long-lived token, persiste MetaConnection |
+| GET | `/api/v1/auth/meta/connections` | Lista conexões ativas do tenant |
+| DELETE | `/api/v1/auth/meta/connections/{id}` | Revoga e remove conexão |
 
-### Leads
-
-| Método | Rota | Descrição |
-|---|---|---|
-| GET | `/api/v1/leads` | Listar leads |
-| GET | `/api/v1/leads/{id}` | Detalhe |
-| PUT | `/api/v1/leads/{id}` | Atualizar |
-| DELETE | `/api/v1/leads/{id}` | Remover |
-
-### Contas
-
-| Método | Rota | Descrição |
-|---|---|---|
-| GET | `/api/v1/accounts` | Listar |
-| GET | `/api/v1/accounts/{id}` | Detalhe |
-| PUT | `/api/v1/accounts/{id}` | Atualizar |
-| DELETE | `/api/v1/accounts/{id}` | Remover |
-
-### Automações
-
-| Método | Rota | Descrição |
-|---|---|---|
-| POST | `/api/v1/automation/config` | Salvar configuração |
-| GET | `/api/v1/automations` | Listar |
-| GET | `/api/v1/automations/{id}` | Detalhe |
-| PUT | `/api/v1/automations/{id}` | Atualizar |
-| DELETE | `/api/v1/automations/{id}` | Remover |
-
-### Studio
-
-| Método | Rota | Descrição |
-|---|---|---|
-| POST | `/api/v1/studio/analyze-image` | Analisa imagem → sugestões de prompt |
-| POST | `/api/v1/studio/generate-video` | Inicia geração de vídeo → `job_id` |
-| GET | `/api/v1/studio/generation-status/{job_id}` | Status e progresso da geração |
-| POST | `/api/v1/studio/publish-video` | Publica no Instagram |
+**Providers:** `instagram` · `whatsapp` · `ads`
 
 ---
 
 ## Banco de Dados
 
-### `accounts` — tenant principal
+### Tabelas e relações
+
+```
+accounts (tenant)
+  ├── users           (agentes do tenant — FK tenant_id)
+  ├── meta_connections (conexões Meta por provider — FK account_id)
+  ├── leads           (contatos capturados — FK account_id)
+  │   └── conversations (atendimentos — FK tenant_id + customer_id)
+  │       └── messages  (histórico — FK tenant_id + conversation_id)
+  ├── automation_configs
+  └── video_generations
+```
+
+### `users`
 
 | Campo | Tipo | Notas |
 |---|---|---|
 | id | UUID | PK |
-| brand_name | String | Nome da marca |
-| meta_page_id | String | ID da Página Facebook (UNIQUE) |
-| meta_page_name | String | Nome da Página |
-| meta_access_token | Text | Token legacy (onboarding) |
-| meta_token_expires_at | DateTime | Validade do token |
-| plan_type | String | `autonomo` ou `agencia` |
-| onboarding_step | Integer | Etapa atual (0–4) |
+| tenant_id | UUID | FK → accounts, CASCADE |
+| username | String(100) | UNIQUE global |
+| password_hash | Text | bcrypt |
+| full_name | String | opcional |
+| role | String | `admin` · `agent` |
 | is_active | Boolean | |
 
-### `meta_connections` — conexões por provider (NOVO)
+### `conversations`
 
 | Campo | Tipo | Notas |
 |---|---|---|
 | id | UUID | PK |
-| account_id | String | FK → accounts, indexed |
+| tenant_id | UUID | FK → accounts |
+| customer_id | UUID | FK → leads (SET NULL) |
+| atendente_id | UUID | FK → users (SET NULL) |
+| atendimento_status | String | `aberto` · `em_atendimento` · `resolvido` · `aguardando` |
+| status | String | `active` · `closed` |
+| unread_count | Integer | Incrementado pelo webhook |
+| last_updated | DateTime | Atualizado a cada mensagem |
+
+### `messages`
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| id | BigSerial | PK |
+| tenant_id | UUID | FK → accounts |
+| conversation_id | UUID | FK → conversations, CASCADE |
+| sender | Text | username do agente ou wa_id do cliente |
+| text | Text | corpo da mensagem |
+| direction | String | `inbound` · `outbound` |
+| wa_id | Text | número WhatsApp do cliente |
+| status | String | `sent` · `delivered` · `read` · `failed` |
+| message_id | Text | wamid da Meta (indexado) |
+| media_type | Text | `image` · `video` · `audio` · `document` |
+| media_url | String | URL pública da mídia |
+| meta_category | String(50) | `marketing` · `utility` · `service` · `authentication` |
+| meta_cost | Float | custo da conversa em USD |
+| is_within_24h_window | Boolean | janela de 24h do WhatsApp |
+| template_name | Text | nome do template (se aplicável) |
+| template_vars | JSON | variáveis `{{1}}`, `{{2}}`... |
+| payload | JSON | raw payload da Meta |
+
+### `meta_connections`
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| account_id | UUID | FK → accounts |
 | provider | String | `instagram` · `whatsapp` · `ads` |
-| meta_user_id | String | ID do usuário Meta |
-| page_id | String | ID da Página Facebook |
-| ig_business_account_id | String | ID do IG Business Account |
-| waba_id | String | ID da conta WhatsApp Business |
-| ad_account_id | String | ID da conta de anúncios |
-| access_token_encrypted | Text | Token criptografado com Fernet |
-| token_type | String | `long_lived` |
-| expires_at | DateTime | ~60 dias após conexão |
-| scopes | Text | Escopos OAuth concedidos (CSV) |
-| status | String | `active` · `expired` · `needs_reauth` · `revoked` |
-
-### `leads`
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| id | UUID | PK |
-| account_id | String | FK → accounts |
-| instagram_handle | String | @ do usuário |
-| name / email / phone | String | Dados do lead |
-| source | Enum | `instagram_comment` · `instagram_dm` · `instagram_form` · `manual` |
-| status | Enum | `new` · `contacted` · `qualified` · `converted` · `lost` |
-| captured_at | DateTime | |
-
-### `automation_configs`, `customers`, `sales`, `video_generations`, `credit_usages`, `alerts`
-
-Todos com `account_id` FK → accounts para isolamento de tenant.
-
----
-
-## Fluxo OAuth Multi-Provider
-
-```
-Frontend
-  → GET /auth/meta/start?account_id=xxx&provider=instagram
-  ← { auth_url: "https://facebook.com/...&state=<HMAC>" }
-
-  → redireciona usuário para auth_url
-
-Meta OAuth
-  → redireciona para /auth/meta/callback?code=yyy&state=<HMAC>
-
-Backend /auth/meta/callback
-  1. Valida state (HMAC SHA-256, expira em 10 min)
-  2. Troca code → short-lived token
-  3. Troca short-lived → long-lived token (~60 dias)
-  4. Descobre Page, IG Business Account, WABA ou Ad Account
-  5. Criptografa token com Fernet
-  6. Upsert em meta_connections
-  ← { account_id, brand_name, page_name, onboarding_step }
-```
-
----
-
-## Serviços Meta
-
-### `instagram_service.py`
-
-| Função | Descrição |
-|---|---|
-| `send_dm(token, recipient_id, message)` | Envia DM via Messaging API |
-| `reply_to_comment(token, comment_id, message)` | Responde comentário |
-| `publish_image_post(token, ig_user_id, image_url, caption)` | Publica imagem (container flow) |
-| `publish_video_post(token, ig_user_id, video_url, caption)` | Publica Reel (container + polling) |
-| `list_media(token, ig_user_id, limit)` | Lista mídias do IG Business |
-
-### `whatsapp_service.py`
-
-| Função | Descrição |
-|---|---|
-| `send_text(token, phone_number_id, to, body)` | Texto livre (janela de 24h) |
-| `send_template(token, phone_number_id, to, template_name, ...)` | Template aprovado |
-| `mark_as_read(token, phone_number_id, message_id)` | Marca mensagem como lida |
-
-### `ads_service.py`
-
-| Função | Descrição |
-|---|---|
-| `list_campaigns(token, ad_account_id)` | Lista campanhas |
-| `create_campaign(token, ad_account_id, name, objective, ...)` | Cria campanha |
-| `create_ad_set(token, ad_account_id, campaign_id, ...)` | Cria ad set |
-| `create_ad_creative(token, ad_account_id, ...)` | Cria criativo |
-| `create_ad(token, ad_account_id, ad_set_id, creative_id, ...)` | Cria anúncio |
-| `get_account_insights(token, ad_account_id, date_preset, ...)` | Insights da conta |
-
-Todos os serviços têm **retry com exponential back-off** em HTTP 429/5xx (máx. 3 tentativas).
+| phone_number_id | String | ID do número Meta — chave de roteamento do webhook |
+| phone_number | String | número exibível (`+55 83 ...`) |
+| waba_id | String | WhatsApp Business Account ID |
+| access_token_encrypted | Text | Fernet encrypted |
+| meta_templates | JSON | templates sincronizados da Meta |
+| conv_count_marketing | Integer | contador mensal |
+| conv_count_utility | Integer | contador mensal |
+| conv_count_service | Integer | contador mensal |
+| conv_count_auth | Integer | contador mensal |
 
 ---
 
@@ -365,60 +331,82 @@ Todos os serviços têm **retry com exponential back-off** em HTTP 429/5xx (máx
 ```bash
 cd backend
 pip install -r requirements.txt
-pytest
+pytest -v
 ```
 
-| Arquivo | O que testa |
+Usa SQLite in-memory — sem necessidade de PostgreSQL ou Docker.
+
+| Arquivo | Cobertura |
 |---|---|
-| `test_webhook.py` | Validação HMAC, challenge GET, rejeição de payload sem assinatura |
-| `test_auth.py` | State HMAC (roundtrip, expirado, adulterado), encrypt/decrypt, endpoints de connections |
-| `test_tenant.py` | Isolamento por account_id, DELETE bloqueado de outro tenant, multi-provider por conta |
-
-Os testes usam SQLite in-memory — sem necessidade de PostgreSQL rodando.
+| `test_webhook.py` | HMAC, challenge, lead creation, auto-reply, no-duplicate |
+| `test_auth.py` | State HMAC, token encrypt/decrypt, connections endpoints |
+| `test_tenant.py` | Isolamento por tenant, DELETE cross-tenant bloqueado |
 
 ---
 
-## Configuração do Meta for Developers (manual)
+## Estrutura de arquivos
 
-1. Acesse https://developers.facebook.com e crie um app tipo **Business**
-2. Adicione os produtos: **Instagram Graph API**, **WhatsApp Business**, **Marketing API**
-3. Em **Configurações > OAuth**, adicione o redirect URI:
-   ```
-   http://localhost:8000/api/v1/auth/meta/callback
-   ```
-4. Copie o **App ID** e **App Secret** para o `.env`
-5. No painel **Webhooks**, configure:
-   - URL: `https://SEU_DOMINIO/api/v1/webhook/meta` (use ngrok para local)
-   - Verify Token: mesmo valor de `META_WEBHOOK_VERIFY_TOKEN` no `.env`
-   - Campos para inscrever: `messages`, `messaging`, `comments`
-
----
-
-## Deploy
-
-### Docker Compose (local)
-
-```bash
-docker compose up --build -d
+```
+app-marketing/
+├── docker-compose.yml
+├── backend/
+│   ├── .env                      # NÃO commitar
+│   ├── requirements.txt
+│   ├── pytest.ini
+│   ├── tests/
+│   └── app/
+│       ├── main.py               # FastAPI app, lifespan (create_all + migrations)
+│       ├── core/
+│       │   ├── config.py         # Pydantic Settings
+│       │   ├── database.py       # Async engine + get_db
+│       │   ├── security.py       # JWT + bcrypt
+│       │   └── ws_manager.py     # WebSocket ConnectionManager (singleton)
+│       ├── models/
+│       │   ├── account.py        # Tenant
+│       │   ├── user.py           # Usuários + autenticação
+│       │   ├── conversation.py   # Atendimentos
+│       │   ├── message.py        # Histórico de mensagens
+│       │   ├── meta_connection.py # Conexões Meta por provider
+│       │   └── lead.py           # Leads/contatos
+│       ├── routes/
+│       │   ├── auth_jwt.py       # Register, login, refresh, me, users
+│       │   ├── conversations.py  # CRUD conversas
+│       │   ├── messages.py       # CRUD mensagens
+│       │   ├── ws.py             # WebSocket endpoint
+│       │   ├── whatsapp.py       # Credenciais, envio, templates
+│       │   ├── webhook.py        # Meta webhook (IG + WhatsApp)
+│       │   ├── auth.py           # OAuth Meta multi-provider
+│       │   └── privacy.py        # Privacy policy + data deletion
+│       └── services/
+│           ├── whatsapp_service.py   # Cloud API: send, template, media
+│           ├── instagram_service.py  # DM, comment, publish
+│           ├── meta_token_service.py # Fernet, long-lived token, state HMAC
+│           └── ads_service.py        # Campanhas e insights
+└── frontend/
+    └── src/
+        ├── App.tsx
+        └── pages/
+            ├── ConexaoMeta.tsx   # Cards Instagram / WhatsApp / Ads
+            ├── Dashboard.tsx
+            ├── Leads.tsx
+            ├── Automacao.tsx
+            ├── Studio.tsx
+            └── Privacy.tsx
 ```
 
-### Produção (Render / ECS)
-
-- Defina todas as variáveis de ambiente no painel do provedor
-- `FERNET_KEY` **diferente** do ambiente local
-- `DATABASE_URL` apontando para o banco de produção
-- `META_REDIRECT_URI` com o domínio de produção
-- `CORS_ORIGINS` com o domínio do frontend
-
 ---
 
-## Próximos Passos
+## Deploy produção
 
-- [ ] Implementar Claude Vision API em `studio/analyze-image`
-- [ ] Integrar gerador de vídeo (Runway / Kling / Pika) com job queue assíncrono
-- [ ] Adicionar JWT para autenticação de sessão (remover account_id em query params)
-- [ ] Middleware de autorização: validar que a request pertence ao tenant correto
-- [ ] Alembic para migrations incrementais
-- [ ] Gráficos no Dashboard (Recharts)
-- [ ] WebSocket para progresso de geração em tempo real
-- [ ] Lógica real em `handle_ig_comment` / `handle_ig_dm` (captura de lead + auto-reply)
+Quando for para domínio público:
+
+1. Atualize no `.env` de produção:
+   ```env
+   META_REDIRECT_URI=https://seudominio.com/api/v1/auth/meta/callback
+   CORS_ORIGINS=["https://seudominio.com"]
+   FERNET_KEY=nova_chave_diferente_do_local
+   SECRET_KEY=chave_jwt_longa_e_aleatoria
+   ```
+
+2. Configure webhook no Meta Dashboard com a URL de produção
+3. Submeta o app para App Review com as permissões `whatsapp_business_messaging` e `whatsapp_business_management`

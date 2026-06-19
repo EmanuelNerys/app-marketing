@@ -21,7 +21,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marketing_user} -d ${POSTGRES_DB:-app_marketing}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marketing_user} -d ${POSTGRES_DB:-adstudioai}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,7 +37,7 @@ services:
     container_name: adstudioai-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-marketing_user}:${POSTGRES_PASSWORD:-marketing_pass}@postgres:5432/${POSTGRES_DB:-app_marketing}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-marketing_user}:${POSTGRES_PASSWORD:-marketing_pass}@postgres:5432/${POSTGRES_DB:-adstudioai}
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       UVICORN_WORKERS: ${UVICORN_WORKERS:-4}

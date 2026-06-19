@@ -14,9 +14,9 @@ class Account(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     brand_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    meta_page_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    meta_page_name: Mapped[str] = mapped_column(String(255), nullable=True)
-    meta_access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    meta_page_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    meta_page_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    meta_access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta_token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
