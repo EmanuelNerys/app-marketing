@@ -1,17 +1,18 @@
 """
-Tests for webhook signature validation and event routing.
+Tests for webhook signature validation, event routing, and lead capture.
 """
 import hashlib
 import hmac
 import json
 import pytest
+from sqlalchemy import select
+from unittest.mock import AsyncMock, patch
 
 from app.routes.webhook import _verify_signature
+from app.models.account import Account
+from app.models.lead import Lead, LeadSource
+from app.models.automation import AutomationConfig
 
-
-# ---------------------------------------------------------------------------
-# Signature validation
-# ---------------------------------------------------------------------------
 
 APP_SECRET = "test_app_secret"
 
@@ -21,64 +22,67 @@ def _make_signature(body: bytes, secret: str = APP_SECRET) -> str:
     return f"sha256={sig}"
 
 
+async def _signed_post(client, payload: dict):
+    body = json.dumps(payload).encode()
+    return await client.post(
+        "/api/v1/webhook/meta",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": _make_signature(body),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Signature validation (pure functions)
+# ---------------------------------------------------------------------------
+
 def test_valid_signature():
     body = b'{"object":"instagram","entry":[]}'
-    sig = _make_signature(body)
-    assert _verify_signature(body, sig) is True
+    assert _verify_signature(body, _make_signature(body)) is True
 
 
 def test_invalid_signature_wrong_secret():
     body = b'{"object":"instagram","entry":[]}'
-    sig = _make_signature(body, secret="wrong_secret")
-    assert _verify_signature(body, sig) is False
+    assert _verify_signature(body, _make_signature(body, "wrong")) is False
 
 
-def test_invalid_signature_tampered_body():
+def test_tampered_body():
     body = b'{"object":"instagram","entry":[]}'
     sig = _make_signature(body)
-    tampered = b'{"object":"instagram","entry":[{"id":"evil"}]}'
-    assert _verify_signature(tampered, sig) is False
+    assert _verify_signature(b'{"object":"evil"}', sig) is False
 
 
-def test_missing_sha256_prefix():
+def test_missing_prefix():
     body = b'{"object":"instagram"}'
-    # header without "sha256=" prefix
-    bare_hex = hmac.new(APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    assert _verify_signature(body, bare_hex) is False
+    bare = hmac.new(APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    assert _verify_signature(body, bare) is False
 
 
-def test_empty_signature_header():
-    body = b'{"object":"instagram"}'
-    assert _verify_signature(body, "") is False
+def test_empty_signature():
+    assert _verify_signature(b'{}', "") is False
 
 
 # ---------------------------------------------------------------------------
-# GET verification challenge
+# GET challenge verification
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_webhook_verify_challenge(client):
+async def test_challenge_ok(client):
     resp = await client.get(
         "/api/v1/webhook/meta",
-        params={
-            "hub.mode": "subscribe",
-            "hub.verify_token": "test_verify_token",
-            "hub.challenge": "12345",
-        },
+        params={"hub.mode": "subscribe", "hub.verify_token": "test_verify_token", "hub.challenge": "99"},
     )
     assert resp.status_code == 200
-    assert resp.json() == 12345
+    assert resp.json() == 99
 
 
 @pytest.mark.asyncio
-async def test_webhook_verify_wrong_token(client):
+async def test_challenge_wrong_token(client):
     resp = await client.get(
         "/api/v1/webhook/meta",
-        params={
-            "hub.mode": "subscribe",
-            "hub.verify_token": "wrong_token",
-            "hub.challenge": "12345",
-        },
+        params={"hub.mode": "subscribe", "hub.verify_token": "wrong", "hub.challenge": "99"},
     )
     assert resp.status_code == 403
 
@@ -88,24 +92,177 @@ async def test_webhook_verify_wrong_token(client):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_webhook_post_rejects_unsigned(client):
-    payload = json.dumps({"object": "instagram", "entry": []}).encode()
+async def test_post_rejects_unsigned(client):
+    body = json.dumps({"object": "instagram", "entry": []}).encode()
     resp = await client.post(
         "/api/v1/webhook/meta",
-        content=payload,
+        content=body,
         headers={"Content-Type": "application/json"},
     )
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_webhook_post_accepts_signed(client):
-    payload = json.dumps({"object": "instagram", "entry": []}).encode()
-    sig = _make_signature(payload)
-    resp = await client.post(
-        "/api/v1/webhook/meta",
-        content=payload,
-        headers={"Content-Type": "application/json", "X-Hub-Signature-256": sig},
-    )
+async def test_post_accepts_signed_empty(client):
+    resp = await _signed_post(client, {"object": "instagram", "entry": []})
     assert resp.status_code == 200
     assert resp.json() == {"status": "received"}
+
+
+# ---------------------------------------------------------------------------
+# Lead capture — IG comment
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ig_comment_creates_lead(client, db_session):
+    # Cria uma conta (tenant)
+    account = Account(
+        brand_name="Teste",
+        meta_page_id="PAGE_001",
+        meta_page_name="Página Teste",
+        meta_access_token="fake_token",
+    )
+    db_session.add(account)
+    await db_session.flush()
+    await db_session.refresh(account)
+
+    payload = {
+        "object": "instagram",
+        "entry": [{
+            "id": "PAGE_001",
+            "changes": [{
+                "field": "comments",
+                "value": {
+                    "from": {"id": "USER_123", "username": "joao_silva"},
+                    "id": "COMMENT_001",
+                    "text": "Quero saber mais sobre o produto!",
+                },
+            }],
+        }],
+    }
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock):
+        resp = await _signed_post(client, payload)
+
+    assert resp.status_code == 200
+
+    result = await db_session.execute(
+        select(Lead).where(Lead.account_id == account.id)
+    )
+    leads = result.scalars().all()
+    assert len(leads) == 1
+    assert leads[0].instagram_handle == "joao_silva"
+    assert leads[0].source == LeadSource.INSTAGRAM_COMMENT
+
+
+@pytest.mark.asyncio
+async def test_ig_comment_does_not_duplicate_lead(client, db_session):
+    account = Account(
+        brand_name="Dup Test",
+        meta_page_id="PAGE_002",
+        meta_page_name="Página Dup",
+        meta_access_token="fake_token",
+    )
+    db_session.add(account)
+    await db_session.flush()
+
+    payload = {
+        "object": "instagram",
+        "entry": [{
+            "id": "PAGE_002",
+            "changes": [{
+                "field": "comments",
+                "value": {"from": {"id": "U1", "username": "maria"}, "id": "C1", "text": "oi"},
+            }],
+        }],
+    }
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock):
+        await _signed_post(client, payload)
+        await _signed_post(client, payload)  # segundo comentário da mesma pessoa
+
+    result = await db_session.execute(
+        select(Lead).where(Lead.account_id == account.id, Lead.instagram_handle == "maria")
+    )
+    assert len(result.scalars().all()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Auto-reply via keyword match
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_keyword_triggers_auto_reply(client, db_session):
+    account = Account(
+        brand_name="AutoReply Test",
+        meta_page_id="PAGE_003",
+        meta_page_name="Página AR",
+        meta_access_token="fake_token",
+    )
+    db_session.add(account)
+    await db_session.flush()
+    await db_session.refresh(account)
+
+    config = AutomationConfig(
+        account_id=account.id,
+        keyword="quero",
+        auto_reply_message="Olá! Em breve te respondo 😊",
+        is_active=True,
+    )
+    db_session.add(config)
+    await db_session.flush()
+
+    payload = {
+        "object": "instagram",
+        "entry": [{
+            "id": "PAGE_003",
+            "changes": [{
+                "field": "comments",
+                "value": {"from": {"id": "U2", "username": "pedro"}, "id": "C2", "text": "Quero comprar!"},
+            }],
+        }],
+    }
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock) as mock_reply:
+        await _signed_post(client, payload)
+        mock_reply.assert_called_once()
+        _, comment_id, msg = mock_reply.call_args[0]
+        assert comment_id == "C2"
+        assert msg == "Olá! Em breve te respondo 😊"
+
+
+@pytest.mark.asyncio
+async def test_no_match_no_reply(client, db_session):
+    account = Account(
+        brand_name="NoMatch Test",
+        meta_page_id="PAGE_004",
+        meta_page_name="Página NM",
+        meta_access_token="fake_token",
+    )
+    db_session.add(account)
+    await db_session.flush()
+    await db_session.refresh(account)
+
+    config = AutomationConfig(
+        account_id=account.id,
+        keyword="preco",
+        auto_reply_message="Nosso preço é R$ 99",
+        is_active=True,
+    )
+    db_session.add(config)
+    await db_session.flush()
+
+    payload = {
+        "object": "instagram",
+        "entry": [{
+            "id": "PAGE_004",
+            "changes": [{
+                "field": "comments",
+                "value": {"from": {"id": "U3", "username": "ana"}, "id": "C3", "text": "adorei o post!"},
+            }],
+        }],
+    }
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock) as mock_reply:
+        await _signed_post(client, payload)
+        mock_reply.assert_not_called()
