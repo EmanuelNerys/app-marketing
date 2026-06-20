@@ -9,7 +9,9 @@ import httpx
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.security import get_current_user
 from app.models.account import Account
+from app.models.user import User
 from app.services.meta_token_service import safe_decrypt_token
 from app.models.lead import Lead
 from app.models.automation import Customer, Sale
@@ -26,16 +28,21 @@ META_GRAPH_URL = "https://graph.facebook.com/v21.0"
 
 @router.get("", response_model=DashboardResponse)
 async def get_dashboard(
-    account_id: str = Query(default=""),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    account_id = current_user.tenant_id
     now = datetime.now(timezone.utc)
     thirty_days_ago = now - timedelta(days=30)
 
-    total_leads_result = await db.execute(select(func.count(Lead.id)))
+    total_leads_result = await db.execute(
+        select(func.count(Lead.id)).where(Lead.tenant_id == account_id)
+    )
     total_leads = total_leads_result.scalar() or 0
 
-    total_customers_result = await db.execute(select(func.count(Customer.id)))
+    total_customers_result = await db.execute(
+        select(func.count(Customer.id)).where(Customer.tenant_id == account_id)
+    )
     total_customers = total_customers_result.scalar() or 0
 
     new_customers_result = await db.execute(

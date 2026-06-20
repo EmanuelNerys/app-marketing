@@ -20,6 +20,8 @@ class Account(Base):
     meta_token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    customer_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     plan_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="autonomo"
     )

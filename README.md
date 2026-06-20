@@ -163,6 +163,25 @@ Todas as rotas protegidas exigem `Authorization: Bearer <access_token>`.
 
 ---
 
+### Pagamentos (Asaas)
+
+| Método | Rota | Autenticação | Descrição |
+|---|---|---|---|
+| GET | `/api/v1/payments/plans` | Pública | Lista planos disponíveis (Gratuito, Starter R$99, Pro R$299, Premium R$899) |
+| POST | `/api/v1/payments/checkout` | Pública | Checkout sem login: cria conta temporária + cobrança no Asaas. Body: `{plan, name, email}`. Redireciona para `payment_link` |
+| POST | `/api/v1/payments/subscribe` | JWT | Cria assinatura para usuário logado. Retorna `payment_link` |
+| GET | `/api/v1/payments/current` | JWT | Retorna assinatura ativa do tenant |
+| POST | `/api/v1/payments/upgrade` | JWT | Faz upgrade de plano (cancela atual + cria nova) |
+| POST | `/api/v1/payments/webhook/asaas` | Pública | Webhook do Asaas (valida `asaas-access-token`). Confirma/cancela assinaturas |
+
+### Auth — Pós-pagamento
+
+| Método | Rota | Autenticação | Descrição |
+|---|---|---|---|
+| POST | `/api/v1/auth/complete-signup` | Pública | Define senha após pagamento. Body: `{email, password}`. Retorna JWT |
+
+---
+
 ### WhatsApp Business
 
 | Método | Rota | Descrição |

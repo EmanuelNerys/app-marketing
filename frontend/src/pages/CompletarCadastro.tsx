@@ -2,28 +2,42 @@ import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 
-export default function Login() {
-  const [email, setEmail] = useState('')
+export default function CompletarCadastro() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+
+  const email = searchParams.get('email') || ''
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+
+    if (password !== confirmPassword) {
+      setError('Senhas não conferem')
+      return
+    }
+    if (password.length < 6) {
+      setError('Senha deve ter no mínimo 6 caracteres')
+      return
+    }
+
     setLoading(true)
     try {
-      const { data } = await api.post('/auth/login', { username: email, password })
+      const { data } = await api.post('/auth/complete-signup', {
+        email,
+        password,
+      })
       localStorage.setItem('access_token', data.access_token)
       localStorage.setItem('refresh_token', data.refresh_token)
       localStorage.setItem('user_id', data.user_id)
       localStorage.setItem('tenant_id', data.tenant_id)
-      const redirect = searchParams.get('redirect') || '/app'
-      navigate(redirect)
-    } catch {
-      setError('Email ou senha inválidos.')
+      navigate('/app')
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Erro ao completar cadastro')
     } finally {
       setLoading(false)
     }
@@ -36,8 +50,8 @@ export default function Login() {
           <div className="w-14 h-14 bg-brand-600 rounded-xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-brand-600/25">
             <span className="text-2xl font-bold text-white">AM</span>
           </div>
-          <h1 className="text-2xl font-bold text-dark-600">adStudioAI</h1>
-          <p className="text-dark-400 text-sm mt-1">Automação de captação de leads</p>
+          <h1 className="text-2xl font-bold text-dark-600">Bem-vindo ao adStudioAI</h1>
+          <p className="text-dark-400 text-sm mt-1">Seu pagamento foi confirmado! Agora defina sua senha.</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-surface-card rounded-2xl border border-dark-50 p-8 space-y-5">
           {error && (
@@ -48,9 +62,8 @@ export default function Login() {
             <input
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="seu@email.com"
-              className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
+              disabled
+              className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-400 rounded-lg focus:outline-none cursor-not-allowed"
             />
           </div>
           <div>
@@ -59,25 +72,27 @@ export default function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="********"
+              placeholder="Mínimo 6 caracteres"
               className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
             />
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row pt-2">
-            <button 
-              type="button" 
-              onClick={() => navigate('/onboarding')}
-              className="w-full py-2.5 bg-dark-50 hover:bg-dark-100 text-dark-600 font-semibold rounded-lg transition-colors shadow-md border border-dark-50"
-            >
-              Escolher Plano
-            </button>
-            <button type="submit" disabled={loading} className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-600/50 text-white font-semibold rounded-lg transition-colors shadow-md">
-              {loading ? 'Entrando...' : 'Entrar'}
-            </button>
+          <div>
+            <label className="block text-sm font-medium text-dark-500 mb-2">Confirmar senha</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Repita a senha"
+              className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
+            />
           </div>
-          <p className="text-xs text-dark-400 text-center">
-            <a href="/" className="hover:text-brand-400 underline">Voltar para página inicial</a>
-          </p>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-600/50 text-white font-semibold rounded-lg transition-colors shadow-md"
+          >
+            {loading ? 'Salvando...' : 'Criar Conta e Acessar'}
+          </button>
         </form>
       </div>
     </div>

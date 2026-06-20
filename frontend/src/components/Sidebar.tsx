@@ -7,6 +7,7 @@ const links = [
   { to: '/app/automacao', label: 'Automação', icon: '⚙️' },
   { to: '/app/leads', label: 'Leads', icon: '👥' },
   { to: '/app/configuracoes', label: 'Configurações', icon: '⚡' },
+  { to: '/pricing', label: 'Planos', icon: '💰' },
 ]
 
 export default function Sidebar() {

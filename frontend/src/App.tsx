@@ -10,6 +10,8 @@ import Leads from './pages/Leads'
 import Configuracoes from './pages/Configuracoes'
 import Studio from './pages/Studio'
 import Privacy from './pages/Privacy'
+import Pricing from './pages/Pricing'
+import CompletarCadastro from './pages/CompletarCadastro'
 
 export default function App() {
   return (
@@ -19,6 +21,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/pricing" element={<Pricing />} />
+        <Route path="/completar-cadastro" element={<CompletarCadastro />} />
         <Route element={<Layout />}>
           <Route path="/app" element={<Dashboard />} />
           <Route path="/app/studio" element={<Studio />} />

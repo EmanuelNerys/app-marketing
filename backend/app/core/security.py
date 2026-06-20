@@ -71,6 +71,20 @@ async def get_current_user(
     return user
 
 
+async def get_current_account(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.account import Account
+
+    user = await get_current_user(token, db)
+    result = await db.execute(select(Account).where(Account.id == user.tenant_id, Account.is_active == True))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Conta não encontrada.")
+    return account
+
+
 async def get_current_user_ws(token: str, db: AsyncSession) -> Any:
     """Variant for WebSocket — returns user or None (doesn't raise)."""
     from app.models.user import User

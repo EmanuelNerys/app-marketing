@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     jwt_refresh_expire_days: int = 30
     cors_origins: str = '["http://localhost:5173"]'
 
+    # Asaas Payment Gateway
+    asaas_api_key: str = ""
+    asaas_mode: str = "sandbox"  # sandbox or production
+    asaas_webhook_token: str = ""
+
     @property
     def meta_graph_url(self) -> str:
         return f"https://graph.facebook.com/{self.meta_api_version}"

@@ -1,55 +1,15 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import api from '../services/api'
 
-const plans = [
-  {
-    name: 'Startup',
-    price: 'R$ 97',
-    period: '/mês',
-    description: 'Para quem está começando a captar leads',
-    features: [
-      '1 conta Meta conectada',
-      'Até 500 leads/mês',
-      'Resposta automática por palavra-chave',
-      'Dashboard básico',
-      'Suporte por email',
-    ],
-    cta: 'Começar Grátis',
-    featured: false,
-  },
-  {
-    name: 'Profissional',
-    price: 'R$ 197',
-    period: '/mês',
-    description: 'Para agências e profissionais de marketing',
-    features: [
-      '3 contas Meta conectadas',
-      'Até 2.000 leads/mês',
-      'Resposta automática + DM',
-      'Dashboard completo com gráficos',
-      'Relatórios de conversão',
-      'Suporte prioritário',
-    ],
-    cta: 'Assinar Agora',
-    featured: true,
-  },
-  {
-    name: 'Enterprise',
-    price: 'R$ 497',
-    period: '/mês',
-    description: 'Para empresas com alto volume de vendas',
-    features: [
-      'Contas Meta ilimitadas',
-      'Leads ilimitados',
-      'Automação avançada + CRM',
-      'Dashboard + Faturamento',
-      'API dedicada + Webhooks',
-      'Suporte 24h via WhatsApp',
-      'Gerente de contas dedicado',
-    ],
-    cta: 'Falar com Vendas',
-    featured: false,
-  },
-]
+interface Plan {
+  id: string
+  name: string
+  value: number
+  description: string
+  features: string[]
+  interval_days: number
+}
 
 const faq = [
   { q: 'Como funciona a captura de leads pelo Instagram?', a: 'Nosso sistema monitora comentários e mensagens da sua página do Instagram. Quando um seguidor comenta com a palavra-chave que você definiu, automaticamente salvamos o lead e enviamos uma mensagem personalizada.' },
@@ -61,6 +21,79 @@ const partners = ['Empresa A', 'Empresa B', 'Empresa C', 'Empresa D', 'Empresa E
 
 export default function Landing() {
   const navigate = useNavigate()
+  const [plans, setPlans] = useState<Plan[]>([])
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
+  const [showModal, setShowModal] = useState(false)
+  const [modalPlan, setModalPlan] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [modalError, setModalError] = useState('')
+  const [modalLoading, setModalLoading] = useState(false)
+
+  useEffect(() => {
+    fetchPlans()
+  }, [])
+
+  const fetchPlans = async () => {
+    try {
+      const response = await api.get('/payments/plans')
+      setPlans(response.data)
+    } catch (error) {
+      console.error('Error fetching plans:', error)
+    }
+  }
+
+  const handlePlanClick = (planId: string) => {
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      setSelectedPlan(planId)
+      checkoutLoggedIn(planId)
+    } else {
+      setModalPlan(planId)
+      setName('')
+      setEmail('')
+      setModalError('')
+      setShowModal(true)
+    }
+  }
+
+  const checkoutLoggedIn = async (planId: string) => {
+    setSelectedPlan(planId)
+    try {
+      const response = await api.post('/payments/subscribe', { plan: planId })
+      if (response.data.payment_link) {
+        window.location.href = response.data.payment_link
+      } else {
+        navigate('/app')
+      }
+    } catch (error) {
+      alert('Erro ao criar assinatura. Tente novamente.')
+    } finally {
+      setSelectedPlan(null)
+    }
+  }
+
+  const handleModalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setModalError('')
+    if (!name.trim() || !email.trim()) {
+      setModalError('Preencha nome e email')
+      return
+    }
+    setModalLoading(true)
+    try {
+      const response = await api.post('/payments/checkout', {
+        plan: modalPlan,
+        name: name.trim(),
+        email: email.trim(),
+      })
+      window.location.href = response.data.payment_link
+    } catch (err: any) {
+      setModalError(err.response?.data?.detail || 'Erro ao processar checkout')
+    } finally {
+      setModalLoading(false)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-surface text-dark-600">
@@ -145,28 +178,62 @@ export default function Landing() {
         <div className="max-w-6xl mx-auto px-4">
           <h3 className="text-3xl font-bold text-white text-center mb-4">Planos para todo negócio</h3>
           <p className="text-dark-400 text-center max-w-xl mx-auto mb-12">Escolha o plano ideal para o seu momento. Todos incluem 7 dias de teste grátis.</p>
-          <div className="grid md:grid-cols-3 gap-6">
-            {plans.map((plan) => (
-              <div key={plan.name} className={`rounded-xl border p-6 flex flex-col ${plan.featured ? 'bg-brand-600 border-brand-500 shadow-xl shadow-brand-600/20 scale-105' : 'bg-surface-card border-dark-50'}`}>
-                {plan.featured && <span className="text-white text-xs font-semibold bg-white/20 rounded-full px-3 py-1 w-fit mb-3">Mais popular</span>}
-                <h4 className="text-xl font-bold text-white">{plan.name}</h4>
-                <p className={`text-sm mt-1 ${plan.featured ? 'text-white/80' : 'text-dark-400'}`}>{plan.description}</p>
-                <div className="mt-4 mb-6">
-                  <span className="text-4xl font-bold text-white">{plan.price}</span>
-                  <span className={`text-sm ${plan.featured ? 'text-white/70' : 'text-dark-400'}`}>{plan.period}</span>
+          {plans.length === 0 ? (
+            <p className="text-dark-400 text-center">Carregando planos...</p>
+          ) : (
+            <div className="grid md:grid-cols-3 gap-6">
+              {plans.filter(p => p.value > 0).map((plan, index) => (
+                <div key={plan.id} className={`rounded-xl border p-6 flex flex-col ${index === 1 ? 'bg-brand-600 border-brand-500 shadow-xl shadow-brand-600/20 scale-105' : 'bg-surface-card border-dark-50'}`}>
+                  {index === 1 && <span className="text-white text-xs font-semibold bg-white/20 rounded-full px-3 py-1 w-fit mb-3">Mais popular</span>}
+                  <h4 className="text-xl font-bold text-white">{plan.name}</h4>
+                  <p className={`text-sm mt-1 ${index === 1 ? 'text-white/80' : 'text-dark-400'}`}>{plan.description}</p>
+                  <div className="mt-4 mb-6">
+                    <span className="text-4xl font-bold text-white">R$ {plan.value.toFixed(0)}</span>
+                    <span className={`text-sm ${index === 1 ? 'text-white/70' : 'text-dark-400'}`}>/mês</span>
+                  </div>
+                  <ul className="space-y-3 mb-8 flex-1">
+                    {plan.features.map((f) => (
+                      <li key={f} className={`flex items-center gap-2 text-sm ${index === 1 ? 'text-white/90' : 'text-dark-400'}`}>
+                        <span className="text-brand-400">✓</span>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    onClick={() => handlePlanClick(plan.id)}
+                    disabled={selectedPlan !== null}
+                    className={`w-full py-3 font-semibold rounded-xl transition-colors text-sm ${
+                      selectedPlan === plan.id
+                        ? 'bg-opacity-50 cursor-wait'
+                        : index === 1
+                        ? 'bg-white text-brand-700 hover:bg-white/90'
+                        : 'bg-brand-600 hover:bg-brand-700 text-white'
+                    } ${selectedPlan !== null ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  >
+                    {selectedPlan === plan.id ? 'Redirecionando...' : 'Assinar Agora'}
+                  </button>
                 </div>
-                <ul className="space-y-3 mb-8 flex-1">
-                  {plan.features.map((f) => (
-                    <li key={f} className={`flex items-center gap-2 text-sm ${plan.featured ? 'text-white/90' : 'text-dark-400'}`}>
-                      <span className="text-brand-400">✓</span>
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                <button onClick={() => navigate('/login')} className={`w-full py-3 font-semibold rounded-xl transition-colors text-sm ${plan.featured ? 'bg-white text-brand-700 hover:bg-white/90' : 'bg-brand-600 hover:bg-brand-700 text-white'}`}>{plan.cta}</button>
-              </div>
-            ))}
-          </div>
+              ))}
+              {plans.filter(p => p.value === 0).map(plan => (
+                <div key={plan.id} className="rounded-xl border p-6 flex flex-col bg-surface-card border-dark-50">
+                  <h4 className="text-xl font-bold text-white">{plan.name}</h4>
+                  <p className="text-sm mt-1 text-dark-400">{plan.description}</p>
+                  <div className="mt-4 mb-6">
+                    <span className="text-4xl font-bold text-white">Grátis</span>
+                  </div>
+                  <ul className="space-y-3 mb-8 flex-1">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex items-center gap-2 text-sm text-dark-400">
+                        <span className="text-brand-400">✓</span>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <button onClick={() => navigate('/login')} className="w-full py-3 font-semibold rounded-xl transition-colors text-sm bg-brand-600 hover:bg-brand-700 text-white">Começar Grátis</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -204,6 +271,59 @@ export default function Landing() {
           </div>
         </div>
       </footer>
+
+      {/* Modal de cadastro pré-pagamento */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-surface-card border border-dark-50 rounded-2xl p-8 w-full max-w-md mx-4">
+            <div className="text-center mb-6">
+              <h3 className="text-xl font-bold text-white">Quase lá!</h3>
+              <p className="text-dark-400 text-sm mt-1">Preencha seus dados para seguir para o pagamento.</p>
+            </div>
+            <form onSubmit={handleModalSubmit} className="space-y-4">
+              {modalError && (
+                <div className="bg-red-900/20 border border-red-900/40 text-red-400 text-sm rounded-lg px-4 py-3 text-center">{modalError}</div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-dark-500 mb-2">Nome completo</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Seu nome"
+                  className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-500 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 py-2.5 border border-dark-50 text-dark-400 hover:text-white font-semibold rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={modalLoading}
+                  className="flex-1 py-2.5 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-600/50 text-white font-semibold rounded-lg transition-colors shadow-md"
+                >
+                  {modalLoading ? 'Redirecionando...' : 'Ir para Pagamento'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

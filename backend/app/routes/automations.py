@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.user import User
 from app.models.automation import AutomationConfig
 from app.schemas import AutomationConfigResponse, AutomationConfigUpdate
 
@@ -14,17 +16,29 @@ router = APIRouter(prefix="/automations", tags=["automations"])
 
 
 @router.get("", response_model=List[AutomationConfigResponse])
-async def list_automations(db: AsyncSession = Depends(get_db)):
+async def list_automations(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     result = await db.execute(
-        select(AutomationConfig).order_by(AutomationConfig.created_at.desc())
+        select(AutomationConfig)
+        .where(AutomationConfig.account_id == current_user.tenant_id)
+        .order_by(AutomationConfig.created_at.desc())
     )
     return result.scalars().all()
 
 
 @router.get("/{automation_id}", response_model=AutomationConfigResponse)
-async def get_automation(automation_id: str, db: AsyncSession = Depends(get_db)):
+async def get_automation(
+    automation_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     result = await db.execute(
-        select(AutomationConfig).where(AutomationConfig.id == automation_id)
+        select(AutomationConfig).where(
+            AutomationConfig.id == automation_id,
+            AutomationConfig.account_id == current_user.tenant_id,
+        )
     )
     config = result.scalar_one_or_none()
     if not config:
@@ -37,9 +51,13 @@ async def update_automation(
     automation_id: str,
     data: AutomationConfigUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
-        select(AutomationConfig).where(AutomationConfig.id == automation_id)
+        select(AutomationConfig).where(
+            AutomationConfig.id == automation_id,
+            AutomationConfig.account_id == current_user.tenant_id,
+        )
     )
     config = result.scalar_one_or_none()
     if not config:
@@ -54,9 +72,16 @@ async def update_automation(
 
 
 @router.delete("/{automation_id}")
-async def delete_automation(automation_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_automation(
+    automation_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     result = await db.execute(
-        select(AutomationConfig).where(AutomationConfig.id == automation_id)
+        select(AutomationConfig).where(
+            AutomationConfig.id == automation_id,
+            AutomationConfig.account_id == current_user.tenant_id,
+        )
     )
     config = result.scalar_one_or_none()
     if not config:

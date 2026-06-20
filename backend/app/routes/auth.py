@@ -385,8 +385,18 @@ async def select_plan(
 ):
     result = await db.execute(select(Account).where(Account.id == account_id))
     account = result.scalar_one_or_none()
+
     if not account:
-        raise HTTPException(status_code=404, detail="Conta não encontrada")
+        account = Account(
+            id=account_id,
+            brand_name=data.plan_type,
+            plan_type=data.plan_type,
+            onboarding_step=1,
+        )
+        db.add(account)
+        await db.flush()
+        await db.refresh(account)
+        return {"success": True, "plan_type": account.plan_type, "onboarding_step": account.onboarding_step, "account_id": account.id}
 
     if data.plan_type not in ("autonomo", "agencia"):
         raise HTTPException(status_code=400, detail="Plano inválido. Escolha 'autonomo' ou 'agencia'.")

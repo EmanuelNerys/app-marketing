@@ -173,6 +173,40 @@ async def me(current_user: User = Depends(get_current_user)):
 # Criar agente adicional (apenas admin do tenant)
 # ---------------------------------------------------------------------------
 
+class CompleteSignupRequest(BaseModel):
+    email: str
+    password: str = Field(..., min_length=6)
+
+
+@router.post("/complete-signup", response_model=TokenResponse)
+async def complete_signup(body: CompleteSignupRequest, db: AsyncSession = Depends(get_db)):
+    """Complete signup after payment - set password for pre-created account"""
+    result = await db.execute(select(User).where(User.username == body.email))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Conta não encontrada. Efetue o checkout primeiro.")
+
+    if user.is_active and user.password_hash:
+        raise HTTPException(status_code=400, detail="Conta já ativada. Faça login.")
+
+    result = await db.execute(select(Account).where(Account.id == user.tenant_id))
+    account = result.scalar_one_or_none()
+    if not account or not account.is_active:
+        raise HTTPException(status_code=400, detail="Pagamento ainda não confirmado.")
+
+    user.password_hash = hash_password(body.password)
+    user.is_active = True
+    await db.commit()
+
+    return TokenResponse(
+        access_token=create_access_token(user.id, user.tenant_id, user.role),
+        refresh_token=create_refresh_token(user.id, user.tenant_id),
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        role=user.role,
+    )
+
+
 class CreateAgentRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=100)
     password: str = Field(..., min_length=6)
