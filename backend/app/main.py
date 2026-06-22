@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.routes import auth, webhook, automation, dashboard, leads, accounts, automations, studio, privacy
-from app.routes import auth_jwt, conversations, messages, ws, whatsapp, payments
+from app.routes import auth_jwt, conversations, messages, ws, whatsapp, payments, tenants
 
 # Register all models with Base.metadata so create_all creates every table
 import app.models.meta_connection   # noqa: F401
@@ -85,6 +85,7 @@ app.include_router(auth_jwt.router, prefix="/api/v1")
 app.include_router(conversations.router, prefix="/api/v1")
 app.include_router(messages.router, prefix="/api/v1")
 app.include_router(whatsapp.router, prefix="/api/v1")
+app.include_router(tenants.router, prefix="/api/v1")
 app.include_router(payments.router)
 
 # WebSocket (sem prefix /api/v1 — protocolo WS não usa o path prefix)

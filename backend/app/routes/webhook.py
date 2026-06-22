@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -77,7 +78,7 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             if obj == "whatsapp_business_account" or field == "messages":
                 # WhatsApp Cloud API: route by phone_number_id inside metadata
                 phone_number_id = value.get("metadata", {}).get("phone_number_id") or entry_id
-                conn, account = await _resolve_wpp_tenant(phone_number_id, db)
+                conn, account = await _get_tenant_by_phone_id_cached(phone_number_id, db)
                 if not account:
                     logger.warning("No WPP tenant for phone_number_id=%s", phone_number_id)
                     continue
@@ -274,6 +275,7 @@ async def handle_whatsapp_message(
         text_body: str | None = None
         media_type: str | None = None
         media_id: str | None = None
+        media_url: str | None = None
 
         if msg_type == "text":
             text_body = msg_data.get("text", {}).get("body")
@@ -288,6 +290,15 @@ async def handle_whatsapp_message(
                 text_body = interactive["button_reply"].get("title")
             elif interactive.get("type") == "list_reply":
                 text_body = interactive["list_reply"].get("title")
+
+        # Download media from Meta if present
+        if media_id:
+            try:
+                token = decrypt_token(conn.access_token_encrypted)
+                from app.services import whatsapp_service
+                media_url = await whatsapp_service.download_media(token, media_id, return_url_only=True)
+            except Exception as exc:
+                logger.warning("Failed to download media %s: %s", media_id, exc)
 
         # Upsert lead (wa_id as instagram_handle for now)
         lead = await _find_lead(tenant_id, wa_from, db)
@@ -318,6 +329,7 @@ async def handle_whatsapp_message(
             status="delivered",
             message_id=wamid,
             media_type=media_type,
+            media_url=media_url,
             payload=msg_data,
             is_within_24h_window=True,
             created_at=datetime.fromtimestamp(timestamp, tz=timezone.utc) if timestamp else datetime.now(timezone.utc),
@@ -347,6 +359,7 @@ async def handle_whatsapp_message(
             "sender": wa_from,
             "text": text_body,
             "media_type": media_type,
+            "media_url": media_url,
             "direction": "inbound",
             "status": "delivered",
             "message_id": wamid,
@@ -358,6 +371,40 @@ async def handle_whatsapp_message(
             "atendimento_status": conv.atendimento_status,
             "last_updated": conv.last_updated.isoformat(),
         })
+
+        # Auto-reply por keyword para WhatsApp (se configurado)
+        if text_body:
+            matched = await _match_automation(tenant_id, text_body, db)
+            if matched:
+                try:
+                    token = decrypt_token(conn.access_token_encrypted)
+                    from app.services import whatsapp_service
+                    await whatsapp_service.send_text(token, conn.phone_number_id, wa_from, matched.auto_reply_message)
+                    # Salva resposta do bot
+                    bot_msg = Message(
+                        tenant_id=tenant_id,
+                        conversation_id=conv.id,
+                        sender="bot",
+                        text=matched.auto_reply_message,
+                        direction="outbound",
+                        wa_id=wa_from,
+                        status="sent",
+                        is_within_24h_window=True,
+                    )
+                    db.add(bot_msg)
+                    await db.flush()
+                    await ws_manager.broadcast(tenant_id, "new_message", {
+                        "id": bot_msg.id,
+                        "conversation_id": conv.id,
+                        "sender": "bot",
+                        "text": matched.auto_reply_message,
+                        "direction": "outbound",
+                        "wa_id": wa_from,
+                        "status": "sent",
+                        "created_at": bot_msg.created_at.isoformat(),
+                    })
+                except Exception as exc:
+                    logger.warning("Falha no auto-reply WhatsApp: %s", exc)
 
         await dispatch_event("whatsapp_message", tenant_id, msg_data)
 
@@ -498,5 +545,39 @@ async def _get_token(account: Account, db: AsyncSession) -> str | None:
             return decrypt_token(conn.access_token_encrypted)
         except Exception:
             return None
+
+
+# ---------------------------------------------------------------------------
+# Simple in-memory cache for tenant resolution (phone_number_id -> tenant_id)
+# ---------------------------------------------------------------------------
+
+_tenant_cache: dict[str, tuple[str, float]] = {}
+_TENANT_CACHE_TTL = 300  # 5 minutes
+
+
+async def _get_tenant_by_phone_id_cached(
+    phone_number_id: str, db: AsyncSession
+) -> tuple[MetaConnection | None, Account | None]:
+    now = time.time()
+    cached = _tenant_cache.get(phone_number_id)
+    if cached:
+        tenant_id, expires = cached
+        if now < expires:
+            acc_result = await db.execute(select(Account).where(Account.id == tenant_id))
+            account = acc_result.scalar_one_or_none()
+            if account:
+                conn_result = await db.execute(
+                    select(MetaConnection).where(
+                        MetaConnection.account_id == tenant_id,
+                        MetaConnection.provider == PROVIDER_WHATSAPP,
+                    )
+                )
+                conn = conn_result.scalar_one_or_none()
+                return conn, account
+
+    conn, account = await _resolve_wpp_tenant(phone_number_id, db)
+    if account:
+        _tenant_cache[phone_number_id] = (account.id, now + _TENANT_CACHE_TTL)
+    return conn, account
 
     return None

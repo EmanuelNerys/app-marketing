@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     meta_app_id: str = ""
     meta_app_secret: str = ""
+    meta_oauth_client_secret: str = ""
     meta_api_version: str = "v21.0"
     meta_redirect_uri: str = "http://localhost:8000/api/v1/auth/meta/callback"
     meta_webhook_verify_token: str = ""

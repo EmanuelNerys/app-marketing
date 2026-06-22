@@ -52,7 +52,7 @@ const STATUS_COLOR: Record<Connection['status'], string> = {
 }
 
 export default function ConexaoMeta() {
-  const accountId = localStorage.getItem('account_id') ?? ''
+  const accountId = localStorage.getItem('tenant_id') ?? localStorage.getItem('account_id') ?? ''
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState<Provider | null>(null)
@@ -66,9 +66,7 @@ export default function ConexaoMeta() {
 
   async function loadConnections() {
     try {
-      const res = await api.get<Connection[]>('/auth/meta/connections', {
-        params: { account_id: accountId },
-      })
+      const res = await api.get<Connection[]>('/auth/meta/connections')
       setConnections(res.data)
     } catch {
       setError('Erro ao carregar conexões.')
@@ -78,15 +76,16 @@ export default function ConexaoMeta() {
   }
 
   async function handleConnect(provider: Provider) {
-    if (!accountId) {
-      setError('Conta não identificada. Faça o onboarding primeiro.')
+    const tid = localStorage.getItem('tenant_id')
+    if (!tid) {
+      setError('Conta não identificada. Faça login primeiro.')
       return
     }
     setError('')
     setConnecting(provider)
     try {
       const res = await api.get<{ auth_url: string }>('/auth/meta/start', {
-        params: { account_id: accountId, provider },
+        params: { account_id: tid, provider },
       })
       if (res.data.auth_url) {
         window.location.href = res.data.auth_url
@@ -101,12 +100,13 @@ export default function ConexaoMeta() {
   }
 
   async function handleDisconnect(connection: Connection) {
+    const tid = localStorage.getItem('tenant_id')
     if (!confirm(`Desconectar ${PROVIDERS.find(p => p.key === connection.provider)?.label}?`)) return
     setDisconnecting(connection.id)
     setError('')
     try {
       await api.delete(`/auth/meta/connections/${connection.id}`, {
-        params: { account_id: accountId },
+        params: { account_id: tid },
       })
       setConnections(prev => prev.filter(c => c.id !== connection.id))
     } catch {
@@ -126,6 +126,18 @@ export default function ConexaoMeta() {
         <h2 className="text-2xl font-bold text-dark-600 mb-6">Conexão Meta</h2>
         <div className="bg-surface-card rounded-xl border border-dark-50 p-8 max-w-lg text-center">
           <p className="text-dark-400 text-sm">Complete o onboarding para conectar suas contas.</p>
+        </div>
+      </div>
+    )
+  }
+
+  const token = localStorage.getItem('access_token')
+  if (!token) {
+    return (
+      <div>
+        <h2 className="text-2xl font-bold text-dark-600 mb-6">Conexão Meta</h2>
+        <div className="bg-surface-card rounded-xl border border-dark-50 p-8 max-w-lg text-center">
+          <p className="text-dark-400 text-sm">Faça login primeiro para conectar suas contas.</p>
         </div>
       </div>
     )

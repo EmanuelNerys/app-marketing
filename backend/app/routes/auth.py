@@ -8,6 +8,8 @@ import httpx
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.security import get_current_user
+from app.models.user import User
 from app.models.account import Account
 from app.models.meta_connection import (
     MetaConnection,
@@ -43,12 +45,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _PROVIDER_SCOPES: dict[str, str] = {
     PROVIDER_INSTAGRAM: (
-        "instagram_basic,"
-        "instagram_manage_comments,"
-        "instagram_manage_messages,"
-        "instagram_content_publish,"
         "pages_show_list,"
-        "pages_read_engagement"
+        "pages_read_engagement,"
+        "instagram_manage_comments"
     ),
     PROVIDER_WHATSAPP: (
         "whatsapp_business_messaging,"
@@ -141,7 +140,7 @@ async def meta_callback(
             f"{settings.meta_graph_url}/oauth/access_token",
             params={
                 "client_id": settings.meta_app_id,
-                "client_secret": settings.meta_app_secret,
+                "client_secret": settings.meta_oauth_client_secret or settings.meta_app_secret,
                 "redirect_uri": settings.meta_redirect_uri,
                 "code": code,
             },
@@ -307,11 +306,13 @@ async def meta_callback(
 
 @router.get("/meta/connections")
 async def list_connections(
-    account_id: str = Query(...),
+    account_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    tid = account_id or current_user.tenant_id
     result = await db.execute(
-        select(MetaConnection).where(MetaConnection.account_id == account_id)
+        select(MetaConnection).where(MetaConnection.account_id == tid)
     )
     connections = result.scalars().all()
     return [_serialize_connection(c) for c in connections]

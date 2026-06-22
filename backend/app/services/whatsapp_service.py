@@ -131,11 +131,11 @@ async def mark_as_read(token: str, phone_number_id: str, message_id: str) -> dic
 # Download de mídia
 # ---------------------------------------------------------------------------
 
-async def download_media(token: str, media_id: str) -> bytes:
+async def download_media(token: str, media_id: str, return_url_only: bool = False) -> bytes | str:
     """
     Passo 1: obtém a URL do arquivo.
-    Passo 2: baixa o arquivo.
-    Retorna os bytes brutos.
+    Passo 2: baixa o arquivo (se return_url_only=False).
+    Retorna os bytes brutos ou a URL pública.
     """
     async with httpx.AsyncClient(timeout=30.0) as client:
         r1 = await client.get(
@@ -146,6 +146,9 @@ async def download_media(token: str, media_id: str) -> bytes:
         media_url = r1.json().get("url")
         if not media_url:
             raise ValueError(f"Meta não retornou URL para media_id={media_id}")
+
+        if return_url_only:
+            return media_url
 
         r2 = await client.get(media_url, headers={"Authorization": f"Bearer {token}"})
         r2.raise_for_status()

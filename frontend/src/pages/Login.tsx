@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 
 export default function Login() {
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -15,7 +15,7 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      const { data } = await api.post('/auth/login', { username: email, password })
+      const { data } = await api.post('/auth/login', { username, password })
       localStorage.setItem('access_token', data.access_token)
       localStorage.setItem('refresh_token', data.refresh_token)
       localStorage.setItem('user_id', data.user_id)
@@ -23,7 +23,7 @@ export default function Login() {
       const redirect = searchParams.get('redirect') || '/app'
       navigate(redirect)
     } catch {
-      setError('Email ou senha inválidos.')
+      setError('Usuário ou senha inválidos.')
     } finally {
       setLoading(false)
     }
@@ -44,12 +44,12 @@ export default function Login() {
             <div className="bg-red-900/20 border border-red-900/40 text-red-400 text-sm rounded-lg px-4 py-3 text-center">{error}</div>
           )}
           <div>
-            <label className="block text-sm font-medium text-dark-500 mb-2">Email</label>
+            <label className="block text-sm font-medium text-dark-500 mb-2">Usuário</label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="seu@email.com"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="admin"
               className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
             />
           </div>

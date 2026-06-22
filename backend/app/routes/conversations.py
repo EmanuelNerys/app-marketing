@@ -12,6 +12,11 @@ from app.core.security import get_current_user
 from app.core.ws_manager import ws_manager
 from app.models.user import User
 from app.models.conversation import Conversation
+from app.models.lead import Lead
+from app.models.meta_connection import MetaConnection, PROVIDER_WHATSAPP, STATUS_ACTIVE
+from app.models.message import Message
+from app.services.meta_token_service import decrypt_token
+from app.services import whatsapp_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -49,9 +54,127 @@ class UpdateConversationRequest(BaseModel):
     unread_count: int | None = None
 
 
+class StartConversationRequest(BaseModel):
+    customer_wa_id: str
+    customer_name: str | None = None
+    template_name: str
+    template_language: str = "pt_BR"
+    template_variables: list[str] = []
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.post("/start", response_model=ConversationOut, status_code=201)
+async def start_conversation_with_template(
+    body: StartConversationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Inicia conversa com template (sidebar). Cria lead, conversa e envia template."""
+    if current_user.role != "admin":
+        raise HTTPException(403, "Apenas admins podem iniciar conversas com template.")
+
+    wa_id = body.customer_wa_id
+
+    # Upsert lead
+    result = await db.execute(
+        select(Lead).where(
+            Lead.account_id == current_user.tenant_id,
+            Lead.instagram_handle == wa_id,
+        )
+    )
+    lead = result.scalar_one_or_none()
+    if not lead:
+        lead = Lead(
+            id=str(uuid.uuid4()),
+            account_id=current_user.tenant_id,
+            instagram_handle=wa_id,
+            name=body.customer_name or wa_id,
+            source="manual",
+            status="new",
+        )
+        db.add(lead)
+        await db.flush()
+
+    # Create conversation
+    conv = Conversation(
+        id=str(uuid.uuid4()),
+        tenant_id=current_user.tenant_id,
+        customer_id=lead.id,
+        atendente_id=current_user.id,
+        atendimento_status="em_atendimento",
+        status="active",
+    )
+    db.add(conv)
+    await db.flush()
+
+    # Send template
+    conn_result = await db.execute(
+        select(MetaConnection).where(
+            MetaConnection.account_id == current_user.tenant_id,
+            MetaConnection.provider == PROVIDER_WHATSAPP,
+            MetaConnection.status == STATUS_ACTIVE,
+        )
+    )
+    conn = conn_result.scalar_one_or_none()
+    if conn:
+        token = decrypt_token(conn.access_token_encrypted)
+        components = []
+        if body.template_variables:
+            components.append({
+                "type": "body",
+                "parameters": [{"type": "text", "text": v} for v in body.template_variables],
+            })
+
+        try:
+            result = await whatsapp_service.send_template(
+                token, conn.phone_number_id, wa_id,
+                body.template_name, body.template_language, components or None,
+            )
+            wamid = result.get("messages", [{}])[0].get("id")
+
+            msg = Message(
+                tenant_id=current_user.tenant_id,
+                conversation_id=conv.id,
+                sender=current_user.username,
+                text=f"[template:{body.template_name}] {' | '.join(body.template_variables)}",
+                direction="outbound",
+                wa_id=wa_id,
+                status="sent",
+                message_id=wamid,
+                template_name=body.template_name,
+                template_vars={"variables": body.template_variables},
+                is_within_24h_window=False,
+            )
+            db.add(msg)
+            await db.flush()
+
+            await ws_manager.broadcast(current_user.tenant_id, "new_message", {
+                "id": msg.id,
+                "conversation_id": conv.id,
+                "sender": current_user.username,
+                "text": msg.text,
+                "direction": "outbound",
+                "wa_id": wa_id,
+                "status": "sent",
+                "message_id": wamid,
+                "template_name": body.template_name,
+                "created_at": msg.created_at.isoformat(),
+            })
+        except Exception as exc:
+            logger.warning("Falha ao enviar template na abertura: %s", exc)
+
+    await db.refresh(conv)
+    await ws_manager.broadcast(current_user.tenant_id, "conversation_created", {
+        "id": conv.id,
+        "customer_id": lead.id,
+        "atendimento_status": conv.atendimento_status,
+        "status": conv.status,
+    })
+    return conv
+
 
 @router.get("", response_model=list[ConversationOut])
 async def list_conversations(
