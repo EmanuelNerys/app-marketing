@@ -50,6 +50,10 @@ class Settings(BaseSettings):
         return f"https://graph.facebook.com/{self.meta_api_version}"
 
     @property
+    def ig_graph_url(self) -> str:
+        return f"https://graph.instagram.com/{self.meta_api_version}"
+
+    @property
     def meta_dialog_url(self) -> str:
         return f"https://www.facebook.com/{self.meta_api_version}/dialog/oauth"
 

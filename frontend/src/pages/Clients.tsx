@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  Building2, Plus, ExternalLink, Trash2, Users, TrendingUp,
+  CheckCircle, Wifi, WifiOff, X, Eye, EyeOff,
+  BarChart3,
+} from 'lucide-react'
 import api from '../services/api'
 
 interface Client {
@@ -12,9 +17,60 @@ interface Client {
   created_at: string
 }
 
+interface AgencyStat {
+  id: string
+  brand_name: string
+  is_active: boolean
+  leads: number
+  converted: number
+  conversion_rate: number
+  new_leads_7d: number
+  instagram_connected: boolean
+}
+
+interface AgencyDashboard {
+  total_clients: number
+  active_clients: number
+  total_leads: number
+  total_converted: number
+  overall_conversion_rate: number
+  new_leads_7d: number
+  clients: AgencyStat[]
+}
+
+const planLabel: Record<string, string> = {
+  free: 'Grátis',
+  starter: 'Iniciante',
+  pro: 'Profissional',
+  premium: 'Premium',
+}
+
+const planColor: Record<string, string> = {
+  free:    'text-[#555] bg-white/[0.03] border-white/[0.04]',
+  starter: 'text-blue-400 bg-blue-900/20 border-blue-500/20',
+  pro:     'text-purple-400 bg-purple-900/20 border-purple-500/20',
+  premium: 'text-amber-400 bg-amber-900/20 border-amber-500/20',
+}
+
+function MetricCard({ icon: Icon, iconColor, value, label, sub }: {
+  icon: React.ElementType; iconColor: string; value: string | number; label: string; sub?: string
+}) {
+  return (
+    <div className="bg-[#111118] border border-white/[0.06] rounded-xl p-4 hover:border-white/[0.1] transition-colors">
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-3 ${iconColor}`}>
+        <Icon size={15} strokeWidth={1.75} />
+      </div>
+      <p className="text-xl font-semibold text-[#e2e2e8] leading-none mb-1">{value}</p>
+      <p className="text-xs text-[#555]">{label}</p>
+      {sub && <p className="text-[10px] text-[#444] mt-0.5">{sub}</p>}
+    </div>
+  )
+}
+
 export default function Clients() {
   const navigate = useNavigate()
   const [clients, setClients] = useState<Client[]>([])
+  const [agencyStats, setAgencyStats] = useState<AgencyDashboard | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -24,24 +80,29 @@ export default function Clients() {
   const [createUsername, setCreateUsername] = useState('')
   const [createPassword, setCreatePassword] = useState('')
   const [createFullName, setCreateFullName] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
 
-  useEffect(() => { loadClients() }, [])
+  useEffect(() => { loadData() }, [])
 
-  async function loadClients() {
+  async function loadData() {
     setLoading(true)
     try {
-      const { data } = await api.get('/auth/clients')
-      setClients(data)
+      const [clientsRes, statsRes] = await Promise.allSettled([
+        api.get('/auth/clients'),
+        api.get('/dashboard/agency'),
+      ])
+      if (clientsRes.status === 'fulfilled') setClients(clientsRes.value.data)
+      if (statsRes.status === 'fulfilled') setAgencyStats(statsRes.value.data)
     } catch {
-      setError('Erro ao carregar clientes.')
+      setError('Erro ao carregar dados.')
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleCreate(e: React.FormEvent) {
+  async function handleCreate(e: React.SyntheticEvent) {
     e.preventDefault()
     setCreateError('')
     if (!createName.trim() || !createUsername.trim() || !createPassword.trim()) {
@@ -61,7 +122,7 @@ export default function Clients() {
       setCreateUsername('')
       setCreatePassword('')
       setCreateFullName('')
-      await loadClients()
+      await loadData()
     } catch (err: any) {
       setCreateError(err.response?.data?.detail || 'Erro ao criar cliente.')
     } finally {
@@ -85,123 +146,234 @@ export default function Clients() {
   }
 
   async function handleDelete(clientId: string) {
-    if (!confirm('Tem certeza que deseja desativar este cliente?')) return
+    if (!confirm('Desativar este cliente?')) return
     try {
       await api.delete(`/auth/clients/${clientId}`)
-      await loadClients()
+      await loadData()
     } catch {
       alert('Erro ao remover cliente.')
     }
   }
 
-  const planLabel: Record<string, string> = {
-    free: 'Grátis',
-    starter: 'Iniciante',
-    pro: 'Profissional',
-    premium: 'Premium',
-  }
+  const getClientStat = (clientId: string): AgencyStat | undefined =>
+    agencyStats?.clients.find((c) => c.id === clientId)
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-[#e2e2e8]">Meus Clientes</h2>
-          <p className="text-[#555] text-sm mt-1">Gerencie as contas dos seus clientes como agência.</p>
+          <h1 className="text-xl font-semibold text-[#e2e2e8] flex items-center gap-2">
+            <Building2 size={20} className="text-indigo-400" />
+            Meus Clientes
+          </h1>
+          <p className="text-[#555] text-sm mt-0.5">
+            Gerencie as contas dos seus clientes como agência.
+          </p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
         >
-          + Novo Cliente
+          <Plus size={15} />
+          Novo Cliente
         </button>
       </div>
 
       {error && (
-        <div className="mb-4 bg-red-900/20 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">{error}</div>
+        <div className="mb-5 bg-red-900/20 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">{error}</div>
       )}
 
+      {/* Agency metrics */}
+      {agencyStats && (
+        <div className="mb-6">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-[#444] mb-3 flex items-center gap-2">
+            <BarChart3 size={11} />
+            Visão geral da agência
+            <span className="flex-1 h-px bg-white/[0.05]" />
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <MetricCard
+              icon={Building2}
+              iconColor="bg-indigo-500/10 text-indigo-400"
+              value={agencyStats.total_clients}
+              label="Total de clientes"
+              sub={`${agencyStats.active_clients} ativos`}
+            />
+            <MetricCard
+              icon={Users}
+              iconColor="bg-blue-500/10 text-blue-400"
+              value={agencyStats.total_leads}
+              label="Total de leads"
+              sub={`+${agencyStats.new_leads_7d} esta semana`}
+            />
+            <MetricCard
+              icon={CheckCircle}
+              iconColor="bg-green-500/10 text-green-400"
+              value={agencyStats.total_converted}
+              label="Leads convertidos"
+              sub="em todos os clientes"
+            />
+            <MetricCard
+              icon={TrendingUp}
+              iconColor="bg-purple-500/10 text-purple-400"
+              value={`${agencyStats.overall_conversion_rate}%`}
+              label="Taxa de conversão"
+              sub="conversão global"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Client list */}
       {loading ? (
-        <div className="text-[#555] text-sm">Carregando clientes...</div>
+        <div className="space-y-3">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="bg-[#111118] rounded-xl border border-white/[0.06] p-5 animate-pulse">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-white/[0.04]" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3.5 bg-white/[0.04] rounded w-40" />
+                  <div className="h-2.5 bg-white/[0.03] rounded w-24" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : clients.length === 0 ? (
         <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-16 text-center">
-          <div className="text-6xl mb-6">🏢</div>
-          <h3 className="text-xl font-semibold text-[#e2e2e8] mb-2">Nenhum cliente ainda</h3>
-          <p className="text-[#555] max-w-md mx-auto mb-6">
-            Crie contas para seus clientes e gerencie tudo de um só lugar.
+          <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mx-auto mb-4">
+            <Building2 size={24} className="text-indigo-400" />
+          </div>
+          <h3 className="text-base font-semibold text-[#e2e2e8] mb-2">Nenhum cliente ainda</h3>
+          <p className="text-[#444] text-sm max-w-sm mx-auto mb-5">
+            Crie contas para seus clientes e gerencie tudo em um só lugar.
           </p>
           <button
             onClick={() => setShowCreate(true)}
-            className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
+            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
           >
             Criar primeiro cliente
           </button>
         </div>
       ) : (
-        <div className="grid gap-4 max-w-3xl">
-          {clients.map((client) => (
-            <div
-              key={client.id}
-              className="bg-[#111118] rounded-xl border border-white/[0.06] p-5 flex items-center gap-4"
-            >
-              <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-sm font-bold text-indigo-400 shrink-0">
-                {client.brand_name.charAt(0).toUpperCase()}
-              </div>
+        <div className="space-y-3">
+          {clients.map((client) => {
+            const stat = getClientStat(client.id)
+            return (
+              <div
+                key={client.id}
+                className="bg-[#111118] rounded-xl border border-white/[0.06] p-5 hover:border-white/[0.1] transition-colors"
+              >
+                <div className="flex items-center gap-4">
+                  {/* Avatar */}
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-sm font-bold text-indigo-400 shrink-0">
+                    {client.brand_name.charAt(0).toUpperCase()}
+                  </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-[#e2e2e8] font-semibold text-sm">{client.brand_name}</h3>
-                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                    client.is_active ? 'bg-green-900/20 text-green-400' : 'bg-red-900/20 text-red-400'
-                  }`}>
-                    {client.is_active ? 'Ativo' : 'Inativo'}
-                  </span>
-                  <span className="text-[10px] text-[#444] px-1.5 py-0.5 rounded bg-white/[0.04]">
-                    {planLabel[client.plan] || client.plan}
-                  </span>
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-[#e2e2e8] font-semibold text-sm">{client.brand_name}</h3>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${
+                        client.is_active
+                          ? 'bg-green-900/20 text-green-400 border-green-500/20'
+                          : 'bg-red-900/20 text-red-400 border-red-500/20'
+                      }`}>
+                        {client.is_active ? 'Ativo' : 'Inativo'}
+                      </span>
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${planColor[client.plan] ?? planColor.free}`}>
+                        {planLabel[client.plan] ?? client.plan}
+                      </span>
+                    </div>
+                    <p className="text-[#555] text-xs mt-0.5">@{client.username}</p>
+                  </div>
+
+                  {/* Stats from agency dashboard */}
+                  {stat && (
+                    <div className="hidden md:flex items-center gap-5 mr-4">
+                      <div className="text-center">
+                        <p className="text-sm font-semibold text-[#e2e2e8] leading-none">{stat.leads}</p>
+                        <p className="text-[10px] text-[#444] mt-0.5">leads</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-semibold text-green-400 leading-none">{stat.conversion_rate}%</p>
+                        <p className="text-[10px] text-[#444] mt-0.5">conversão</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] text-[#444]">Instagram</p>
+                        {stat.instagram_connected
+                          ? <Wifi size={12} className="text-green-400 mx-auto mt-0.5" />
+                          : <WifiOff size={12} className="text-[#444] mx-auto mt-0.5" />
+                        }
+                      </div>
+                      {stat.new_leads_7d > 0 && (
+                        <div className="text-center">
+                          <p className="text-sm font-semibold text-blue-400 leading-none">+{stat.new_leads_7d}</p>
+                          <p className="text-[10px] text-[#444] mt-0.5">7 dias</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => handleImpersonate(client.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      <ExternalLink size={12} />
+                      Acessar
+                    </button>
+                    <button
+                      onClick={() => handleDelete(client.id)}
+                      className="p-1.5 bg-red-900/20 text-red-400 rounded-lg hover:bg-red-900/40 transition-colors"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
-                <p className="text-[#555] text-xs mt-0.5">@{client.username}</p>
-                <p className="text-[#444] text-[10px] mt-0.5">
-                  Criado em {new Date(client.created_at).toLocaleDateString('pt-BR')}
-                </p>
-              </div>
 
-              <div className="flex gap-2 shrink-0">
-                <button
-                  onClick={() => handleImpersonate(client.id)}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition-colors"
-                >
-                  Acessar
-                </button>
-                <button
-                  onClick={() => handleDelete(client.id)}
-                  className="px-3 py-1.5 bg-red-900/20 text-red-400 rounded-lg text-xs font-medium hover:bg-red-900/40 transition-colors"
-                >
-                  Remover
-                </button>
+                {/* Mobile stats */}
+                {stat && (
+                  <div className="flex md:hidden items-center gap-4 mt-3 pt-3 border-t border-white/[0.04]">
+                    <span className="text-xs text-[#555]">{stat.leads} leads</span>
+                    <span className="text-xs text-green-400">{stat.conversion_rate}% conversão</span>
+                    {stat.instagram_connected
+                      ? <span className="text-xs text-green-400 flex items-center gap-1"><Wifi size={10} /> Instagram</span>
+                      : <span className="text-xs text-[#444] flex items-center gap-1"><WifiOff size={10} /> Sem Instagram</span>
+                    }
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
-      {/* MODAL CRIAR CLIENTE */}
+      {/* Create modal */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-8 w-full max-w-md">
-            <div className="text-center mb-6">
-              <h3 className="text-lg font-bold text-white">Novo Cliente</h3>
-              <p className="text-xs text-[#555] mt-1.5">Crie uma conta para seu cliente gerenciar.</p>
+          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-7 w-full max-w-md">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-base font-semibold text-white">Novo Cliente</h3>
+                <p className="text-xs text-[#555] mt-0.5">Crie uma subconta para seu cliente.</p>
+              </div>
+              <button onClick={() => setShowCreate(false)} className="text-[#444] hover:text-[#888] transition-colors">
+                <X size={18} />
+              </button>
             </div>
 
             <form onSubmit={handleCreate} className="space-y-4">
               {createError && (
-                <div className="bg-red-900/20 border border-red-500/20 text-red-400 text-xs rounded-lg px-4 py-3 text-center">
+                <div className="bg-red-900/20 border border-red-500/20 text-red-400 text-xs rounded-lg px-4 py-3">
                   {createError}
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-medium text-[#666] mb-1.5">Nome da empresa/cliente *</label>
+                <label className="block text-xs font-medium text-[#666] mb-1.5">Nome da empresa / cliente *</label>
                 <input
                   type="text"
                   value={createName}
@@ -224,13 +396,22 @@ export default function Clients() {
 
               <div>
                 <label className="block text-xs font-medium text-[#666] mb-1.5">Senha *</label>
-                <input
-                  type="password"
-                  value={createPassword}
-                  onChange={(e) => setCreatePassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
-                  className="w-full px-4 py-2.5 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none placeholder-[#333]"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={createPassword}
+                    onChange={(e) => setCreatePassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    className="w-full px-4 py-2.5 pr-10 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none placeholder-[#333]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#444] hover:text-[#888]"
+                  >
+                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -244,7 +425,7 @@ export default function Clients() {
                 />
               </div>
 
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-3 pt-1">
                 <button
                   type="button"
                   onClick={() => setShowCreate(false)}

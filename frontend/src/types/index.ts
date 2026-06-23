@@ -67,6 +67,45 @@ export interface AlertItem {
   created_at: string
 }
 
+export interface Lead {
+  id: string
+  account_id: string
+  name: string | null
+  instagram_handle: string
+  ig_user_id: string | null
+  email: string | null
+  phone: string | null
+  source: string
+  status: string
+  score: number | null
+  score_label: string | null
+  score_notes: string | null
+  last_scored_at: string | null
+  captured_at: string
+  created_at: string
+}
+
+export interface AgencyClientStat {
+  id: string
+  brand_name: string
+  is_active: boolean
+  leads: number
+  converted: number
+  conversion_rate: number
+  new_leads_7d: number
+  instagram_connected: boolean
+}
+
+export interface AgencyDashboard {
+  total_clients: number
+  active_clients: number
+  total_leads: number
+  total_converted: number
+  overall_conversion_rate: number
+  new_leads_7d: number
+  clients: AgencyClientStat[]
+}
+
 export interface DashboardData {
   total_leads: number
   total_customers: number

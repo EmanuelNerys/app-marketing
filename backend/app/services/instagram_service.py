@@ -55,7 +55,7 @@ async def send_dm(token: str, recipient_id: str, message: str) -> dict:
     """Send a direct message to an Instagram user."""
     return await _request(
         "POST",
-        f"{settings.meta_graph_url}/me/messages",
+        f"{settings.ig_graph_url}/me/messages",
         params={"access_token": token},
         json={"recipient": {"id": recipient_id}, "message": {"text": message}},
     )
@@ -69,7 +69,7 @@ async def reply_to_comment(token: str, comment_id: str, message: str) -> dict:
     """Reply to an Instagram comment."""
     return await _request(
         "POST",
-        f"{settings.meta_graph_url}/{comment_id}/replies",
+        f"{settings.ig_graph_url}/{comment_id}/replies",
         params={"access_token": token},
         json={"message": message},
     )
@@ -92,7 +92,7 @@ async def publish_image_post(
     """
     container = await _request(
         "POST",
-        f"{settings.meta_graph_url}/{ig_user_id}/media",
+        f"{settings.ig_graph_url}/{ig_user_id}/media",
         params={"access_token": token},
         json={"image_url": image_url, "caption": caption},
     )
@@ -102,7 +102,7 @@ async def publish_image_post(
 
     return await _request(
         "POST",
-        f"{settings.meta_graph_url}/{ig_user_id}/media_publish",
+        f"{settings.ig_graph_url}/{ig_user_id}/media_publish",
         params={"access_token": token},
         json={"creation_id": container_id},
     )
@@ -120,7 +120,7 @@ async def publish_video_post(
     """
     container = await _request(
         "POST",
-        f"{settings.meta_graph_url}/{ig_user_id}/media",
+        f"{settings.ig_graph_url}/{ig_user_id}/media",
         params={"access_token": token},
         json={"video_url": video_url, "caption": caption, "media_type": "REELS"},
     )
@@ -131,7 +131,7 @@ async def publish_video_post(
     for _ in range(10):
         status = await _request(
             "GET",
-            f"{settings.meta_graph_url}/{container_id}",
+            f"{settings.ig_graph_url}/{container_id}",
             params={"access_token": token, "fields": "status_code"},
         )
         if status.get("status_code") == "FINISHED":
@@ -140,7 +140,7 @@ async def publish_video_post(
 
     return await _request(
         "POST",
-        f"{settings.meta_graph_url}/{ig_user_id}/media_publish",
+        f"{settings.ig_graph_url}/{ig_user_id}/media_publish",
         params={"access_token": token},
         json={"creation_id": container_id},
     )
@@ -154,7 +154,7 @@ async def list_media(token: str, ig_user_id: str, limit: int = 20) -> list[dict]
     """List recent media objects for an IG Business account."""
     data = await _request(
         "GET",
-        f"{settings.meta_graph_url}/{ig_user_id}/media",
+        f"{settings.ig_graph_url}/{ig_user_id}/media",
         params={
             "access_token": token,
             "fields": "id,media_type,media_url,thumbnail_url,caption,timestamp,like_count,comments_count",

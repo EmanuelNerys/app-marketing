@@ -18,11 +18,13 @@ import Marketing from './pages/Marketing'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import VerifyEmail from './pages/VerifyEmail'
+import OAuthSuccess from './pages/OAuthSuccess'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/oauth/success" element={<OAuthSuccess />} />
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/onboarding" element={<Onboarding />} />

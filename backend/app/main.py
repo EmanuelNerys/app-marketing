@@ -48,6 +48,13 @@ _MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ",
+    # Lead scoring & Instagram DM
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS ig_user_id VARCHAR(100)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS score INTEGER",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS score_label VARCHAR(20)",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS score_notes TEXT",
+    "ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_scored_at TIMESTAMPTZ",
+    "CREATE INDEX IF NOT EXISTS ix_leads_score_label ON leads (score_label)",
 ]
 
 

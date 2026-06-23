@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 import httpx
@@ -57,6 +58,30 @@ async def _get_ig_connection(
         raise HTTPException(status_code=400, detail="Instagram Business ID não encontrado. Informe o ig_user_id na requisição.")
 
     return conn, token, ig_id
+
+
+# ---------------------------------------------------------------------------
+# Profile
+# ---------------------------------------------------------------------------
+
+@router.get("/profile")
+async def get_instagram_profile(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conn, token, ig_id = await _get_ig_connection(db, current_user)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{settings.ig_graph_url}/{ig_id}",
+            params={
+                "fields": "id,username,name,account_type,followers_count,media_count,profile_picture_url",
+                "access_token": token,
+            },
+        )
+    data = resp.json()
+    if "error" in data:
+        raise HTTPException(status_code=400, detail=data["error"].get("message", "Erro ao buscar perfil"))
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +324,7 @@ async def get_insights(
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             user_resp = await client.get(
-                f"{settings.meta_graph_url}/{ig_id}",
+                f"{settings.ig_graph_url}/{ig_id}",
                 params={
                     "access_token": token,
                     "fields": "id,username,name,followers_count,follows_count,media_count,profile_picture_url",
@@ -309,7 +334,7 @@ async def get_insights(
             logger.info("IG user data: %s", user_data)
 
             insights_resp = await client.get(
-                f"{settings.meta_graph_url}/{ig_id}/insights",
+                f"{settings.ig_graph_url}/{ig_id}/insights",
                 params={
                     "access_token": token,
                     "metric": "reach,impressions,profile_views,website_clicks,email_contacts,phone_call_clicks,get_direction_clicks",
@@ -378,7 +403,7 @@ async def get_stories_insights(
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             stories_resp = await client.get(
-                f"{settings.meta_graph_url}/{ig_id}/stories",
+                f"{settings.ig_graph_url}/{ig_id}/stories",
                 params={
                     "access_token": token,
                     "fields": "id,media_type,media_url,thumbnail_url,timestamp",
@@ -392,7 +417,7 @@ async def get_stories_insights(
             for story in stories:
                 story_id = story["id"]
                 insights = await client.get(
-                    f"{settings.meta_graph_url}/{story_id}/insights",
+                    f"{settings.ig_graph_url}/{story_id}/insights",
                     params={
                         "access_token": token,
                         "metric": "reach,impressions,exits,replies,taps_forward,taps_back",
@@ -463,3 +488,69 @@ async def update_ig_business_id(
     conn.ig_business_account_id = body.ig_business_account_id
     await db.flush()
     return {"success": True, "ig_business_account_id": body.ig_business_account_id}
+
+
+class SendDMRequest(BaseModel):
+    recipient_ig_user_id: str
+    message: str
+    lead_id: str | None = None
+
+
+@router.post("/dm/send")
+async def send_instagram_dm(
+    body: SendDMRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Envia uma DM para um usuário do Instagram via Graph API."""
+    result = await db.execute(
+        select(MetaConnection).where(
+            MetaConnection.account_id == current_user.tenant_id,
+            MetaConnection.provider == PROVIDER_INSTAGRAM,
+            MetaConnection.status == STATUS_ACTIVE,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    if not conn:
+        raise HTTPException(status_code=400, detail="Instagram não conectado.")
+
+    if not conn.ig_business_account_id:
+        raise HTTPException(
+            status_code=400,
+            detail="ID da conta Instagram Business não configurado.",
+        )
+
+    token = decrypt_token(conn.access_token_encrypted)
+    ig_biz_id = conn.ig_business_account_id
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{settings.ig_graph_url}/{ig_biz_id}/messages",
+            json={
+                "recipient": {"id": body.recipient_ig_user_id},
+                "message": {"text": body.message},
+            },
+            params={"access_token": token},
+        )
+
+    if not resp.is_success:
+        error_detail = resp.json().get("error", {}).get("message", resp.text)
+        logger.error("Erro ao enviar DM Instagram: %s", resp.text)
+        raise HTTPException(status_code=400, detail=f"Erro ao enviar DM: {error_detail}")
+
+    # Atualiza o status do lead para 'contacted' se lead_id fornecido
+    if body.lead_id:
+        from app.models.lead import Lead, LeadStatus
+        from sqlalchemy import select as sa_select
+        lead_result = await db.execute(
+            sa_select(Lead).where(
+                Lead.id == body.lead_id,
+                Lead.account_id == current_user.tenant_id,
+            )
+        )
+        lead = lead_result.scalar_one_or_none()
+        if lead and lead.status == LeadStatus.NEW:
+            lead.status = LeadStatus.CONTACTED
+            await db.flush()
+
+    return {"status": "sent", "message_id": resp.json().get("message_id")}

@@ -8,10 +8,15 @@ class LeadResponse(BaseModel):
     account_id: str
     name: Optional[str] = None
     instagram_handle: str
+    ig_user_id: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     source: str
     status: str
+    score: Optional[int] = None
+    score_label: Optional[str] = None
+    score_notes: Optional[str] = None
+    last_scored_at: Optional[datetime] = None
     captured_at: datetime
     created_at: datetime
 
@@ -24,6 +29,7 @@ class LeadUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     status: Optional[str] = None
+    ig_user_id: Optional[str] = None
 
 
 class AccountResponse(BaseModel):
@@ -162,3 +168,24 @@ class DashboardResponse(BaseModel):
     performance: List[PerformancePoint] = []
     recent_activity: List[RecentActivity] = []
     alerts: List[AlertResponse] = []
+
+
+class AgencyClientStat(BaseModel):
+    id: str
+    brand_name: str
+    is_active: bool
+    leads: int
+    converted: int
+    conversion_rate: float
+    new_leads_7d: int = 0
+    instagram_connected: bool = False
+
+
+class AgencyDashboardResponse(BaseModel):
+    total_clients: int
+    active_clients: int
+    total_leads: int
+    total_converted: int
+    overall_conversion_rate: float
+    new_leads_7d: int = 0
+    clients: List[AgencyClientStat] = []

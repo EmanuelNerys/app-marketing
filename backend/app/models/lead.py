@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Text, DateTime, Enum as SAEnum, ForeignKey
+from sqlalchemy import String, Text, DateTime, Enum as SAEnum, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -37,6 +37,7 @@ class Lead(Base):
     instagram_handle: Mapped[str] = mapped_column(
         String(100), nullable=False, index=True
     )
+    ig_user_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     email: Mapped[str] = mapped_column(String(255), nullable=True)
     phone: Mapped[str] = mapped_column(String(50), nullable=True)
     source: Mapped[LeadSource] = mapped_column(
@@ -49,6 +50,11 @@ class Lead(Base):
         nullable=False,
     )
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AI scoring fields
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score_label: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    score_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 
 type Provider = 'instagram' | 'whatsapp' | 'ads'
@@ -52,6 +51,8 @@ const STATUS_COLOR: Record<Connection['status'], string> = {
   revoked: 'text-red-400',
 }
 
+type ModalState = 'waiting' | 'success' | null
+
 export default function ConexaoMeta() {
   const accountId = localStorage.getItem('tenant_id') ?? localStorage.getItem('account_id') ?? ''
   const [connections, setConnections] = useState<Connection[]>([])
@@ -59,7 +60,10 @@ export default function ConexaoMeta() {
   const [connecting, setConnecting] = useState<Provider | null>(null)
   const [disconnecting, setDisconnecting] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const [searchParams] = useSearchParams()
+  const [modal, setModal] = useState<{ state: ModalState; provider: Provider | null; username?: string }>({
+    state: null,
+    provider: null,
+  })
 
   useEffect(() => {
     if (accountId) loadConnections()
@@ -67,12 +71,18 @@ export default function ConexaoMeta() {
   }, [accountId])
 
   useEffect(() => {
-    if (searchParams.get('instagram') === 'connected') {
-      setConnecting(null)
-      loadConnections()
-      window.history.replaceState({}, '', '/app/conexao')
+    // Recebe mensagem do popup OAuth quando conectar com sucesso
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      if (event.data?.type === 'OAUTH_SUCCESS' && event.data?.provider === 'instagram') {
+        setConnecting(null)
+        setModal({ state: 'success', provider: 'instagram', username: event.data.username || '' })
+        loadConnections()
+      }
     }
-  }, [searchParams])
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
 
   async function loadConnections() {
     try {
@@ -93,23 +103,61 @@ export default function ConexaoMeta() {
     }
     setError('')
     setConnecting(provider)
+    setModal({ state: 'waiting', provider })
+
     try {
-      const endpoint = provider === 'instagram'
-        ? '/auth/instagram/start'
-        : '/auth/meta/start'
+      const endpoint = provider === 'instagram' ? '/auth/instagram/start' : '/auth/meta/start'
       const params: Record<string, string> = provider === 'instagram'
         ? { account_id: tid }
         : { account_id: tid, provider }
       const res = await api.get<{ auth_url: string }>(endpoint, { params })
-      if (res.data.auth_url) {
-        window.open(res.data.auth_url, '_blank')
-      } else {
+
+      if (!res.data.auth_url) {
         setError('Erro ao obter URL de autenticação.')
+        setConnecting(null)
+        setModal({ state: null, provider: null })
+        return
       }
+
+      const w = 520, h = 700
+      const left = Math.round((window.screen.width - w) / 2)
+      const top = Math.round((window.screen.height - h) / 2)
+      const popup = window.open(
+        res.data.auth_url,
+        'oauth_popup',
+        `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes`,
+      )
+
+      if (!popup) {
+        window.location.href = res.data.auth_url
+        return
+      }
+
+      const onMessage = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return
+        if (event.data?.type === 'OAUTH_SUCCESS') {
+          cleanup()
+          setConnecting(null)
+          setModal({ state: 'success', provider, username: event.data.username || '' })
+          loadConnections()
+        }
+      }
+      const pollTimer = setInterval(() => {
+        if (popup.closed) {
+          cleanup()
+          setConnecting(null)
+          setModal(prev => prev.state === 'waiting' ? { state: null, provider: null } : prev)
+        }
+      }, 500)
+      const cleanup = () => {
+        clearInterval(pollTimer)
+        window.removeEventListener('message', onMessage)
+      }
+      window.addEventListener('message', onMessage)
     } catch {
       setError('Erro de conexão com o servidor.')
-    } finally {
       setConnecting(null)
+      setModal({ state: null, provider: null })
     }
   }
 
@@ -132,6 +180,10 @@ export default function ConexaoMeta() {
 
   function getConnection(provider: Provider): Connection | undefined {
     return connections.find(c => c.provider === provider)
+  }
+
+  function closeModal() {
+    setModal({ state: null, provider: null })
   }
 
   if (!accountId) {
@@ -220,17 +272,79 @@ export default function ConexaoMeta() {
                       disabled={connecting === key}
                       className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white rounded-lg text-xs font-semibold transition-colors"
                     >
-                      {connecting === key
-                        ? 'Redirecionando...'
-                        : needsAction
-                        ? 'Reconectar'
-                        : 'Conectar'}
+                      {connecting === key ? 'Aguardando...' : needsAction ? 'Reconectar' : 'Conectar'}
                     </button>
                   )}
                 </div>
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Modal de conexão OAuth */}
+      {modal.state !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
+            {/* Header com gradiente Instagram */}
+            <div className="h-1.5 bg-gradient-to-r from-[#f09433] via-[#e6683c] via-[#dc2743] via-[#cc2366] to-[#bc1888]" />
+
+            <div className="p-8 flex flex-col items-center text-center">
+              {modal.state === 'waiting' ? (
+                <>
+                  {/* Ícone animado */}
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#f09433] via-[#dc2743] to-[#bc1888] flex items-center justify-center mb-5 shadow-lg">
+                    <span className="text-3xl">📸</span>
+                  </div>
+                  <h3 className="text-[#e2e2e8] font-semibold text-base mb-2">Conectando Instagram</h3>
+                  <p className="text-[#555] text-sm mb-6">
+                    Autorize o acesso na janela do Instagram que abriu. Aguardando...
+                  </p>
+                  {/* Spinner */}
+                  <div className="flex gap-1.5 mb-6">
+                    {[0, 1, 2].map(i => (
+                      <div
+                        key={i}
+                        className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce"
+                        style={{ animationDelay: `${i * 0.15}s` }}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    onClick={closeModal}
+                    className="text-[#444] text-xs hover:text-[#666] transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Sucesso */}
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#f09433] via-[#dc2743] to-[#bc1888] flex items-center justify-center mb-5 shadow-lg">
+                    <span className="text-3xl">📸</span>
+                  </div>
+                  <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center -mt-10 ml-10 mb-3 border-2 border-[#111118]">
+                    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <h3 className="text-[#e2e2e8] font-semibold text-base mb-1">Instagram conectado!</h3>
+                  {modal.username && (
+                    <p className="text-indigo-400 text-sm font-medium mb-1">@{modal.username}</p>
+                  )}
+                  <p className="text-[#555] text-xs mb-6">
+                    Sua conta está pronta para DMs, comentários e publicações.
+                  </p>
+                  <button
+                    onClick={closeModal}
+                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors"
+                  >
+                    Fechar
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

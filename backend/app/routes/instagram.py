@@ -24,7 +24,16 @@ from app.services.meta_token_service import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth/instagram", tags=["instagram"])
 
-IG_SCOPES = "pages_show_list,pages_read_engagement"
+# Instagram Business Login — endpoint diferente do Facebook Login
+IG_AUTH_URL = "https://www.instagram.com/oauth/authorize"
+IG_TOKEN_URL = "https://api.instagram.com/oauth/access_token"
+IG_GRAPH_URL = "https://graph.instagram.com/v21.0"
+
+IG_SCOPES = (
+    "instagram_business_basic,"
+    "instagram_business_manage_messages,"
+    "instagram_business_manage_comments"
+)
 
 
 @router.get("/start", response_model=MetaAuthUrlResponse)
@@ -33,13 +42,13 @@ async def instagram_start(
 ):
     state = create_signed_state(account_id, PROVIDER_INSTAGRAM)
     params = {
-        "client_id": settings.meta_app_id,
+        "client_id": settings.ig_app_id or settings.meta_app_id,
         "redirect_uri": settings.ig_redirect_uri,
         "scope": IG_SCOPES,
         "response_type": "code",
         "state": state,
     }
-    auth_url = f"{settings.meta_dialog_url}?{urlencode(params)}"
+    auth_url = f"{IG_AUTH_URL}?{urlencode(params)}"
     return MetaAuthUrlResponse(auth_url=auth_url)
 
 
@@ -59,83 +68,73 @@ async def instagram_callback(
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code.")
 
-    # --- Exchange code for short-lived token via Facebook Graph ---
+    # Troca code por short-lived token (POST multipart/form-data como a doc do Instagram mostra)
+    used_app_id = settings.ig_app_id or settings.meta_app_id
+    used_secret = settings.ig_app_secret or settings.meta_app_secret
+    logger.info(
+        "IG token exchange — client_id=%s secret_len=%s redirect_uri=%r code_prefix=%s",
+        used_app_id, len(used_secret or ""), settings.ig_redirect_uri, (code or "")[:20],
+    )
     async with httpx.AsyncClient() as client:
-        token_resp = await client.get(
-            f"{settings.meta_graph_url}/oauth/access_token",
-            params={
-                "client_id": settings.meta_app_id,
-                "client_secret": settings.meta_oauth_client_secret or settings.meta_app_secret,
-                "redirect_uri": settings.ig_redirect_uri,
-                "code": code,
+        token_resp = await client.post(
+            IG_TOKEN_URL,
+            files={
+                "client_id": (None, used_app_id),
+                "client_secret": (None, used_secret),
+                "grant_type": (None, "authorization_code"),
+                "redirect_uri": (None, settings.ig_redirect_uri),
+                "code": (None, code),
             },
         )
+    logger.info("IG token resp status=%s body=%s", token_resp.status_code, token_resp.text)
     token_data = token_resp.json()
-    logger.info("Token exchange response: %s", token_data)
+
     if "access_token" not in token_data:
-        logger.error("Token exchange failed: %s", token_data)
-        raise HTTPException(status_code=400, detail=f"Instagram authentication failed: {token_data.get('error', {}).get('message', token_data.get('error_type', 'unknown'))}")
+        logger.error("IG token exchange failed: %s", token_data)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Instagram authentication failed: {token_data.get('error_message', token_data.get('error', 'unknown'))}",
+        )
 
     short_lived_token = token_data["access_token"]
+    ig_user_id_fallback = str(token_data.get("user_id", ""))
 
-    # --- Exchange for long-lived token (~60 days) ---
-    try:
-        from datetime import datetime, timezone, timedelta
-        async with httpx.AsyncClient() as client:
-            ll_resp = await client.get(
-                f"{settings.meta_graph_url}/oauth/access_token",
-                params={
-                    "grant_type": "fb_exchange_token",
-                    "client_id": settings.meta_app_id,
-                    "client_secret": settings.meta_oauth_client_secret or settings.meta_app_secret,
-                    "fb_exchange_token": short_lived_token,
-                },
-            )
-        ll_data = ll_resp.json()
-        access_token = ll_data["access_token"]
-        expires_in = ll_data.get("expires_in", 5_184_000)
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
-    except (ValueError, KeyError):
-        access_token = short_lived_token
-        expires_at = None
+    # Troca por long-lived token (~60 dias) via Instagram Graph
+    from datetime import datetime, timezone, timedelta
+    async with httpx.AsyncClient() as client:
+        ll_resp = await client.get(
+            f"{IG_GRAPH_URL}/access_token",
+            params={
+                "grant_type": "ig_exchange_token",
+                "client_id": settings.ig_app_id or settings.meta_app_id,
+                "client_secret": settings.ig_app_secret or settings.meta_app_secret,
+                "access_token": short_lived_token,
+            },
+        )
+    ll_data = ll_resp.json()
+    logger.info("IG long-lived exchange status=%s body=%s", ll_resp.status_code, ll_data)
+    if "access_token" not in ll_data:
+        logger.error("IG long-lived token exchange failed — storing short-lived token as fallback: %s", ll_data)
+    access_token = ll_data.get("access_token", short_lived_token)
+    expires_in = ll_data.get("expires_in", 3600)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
 
-    # --- Fetch user info and pages ---
+    # Busca dados da conta Instagram
     async with httpx.AsyncClient() as client:
         me_resp = await client.get(
-            f"{settings.meta_graph_url}/me",
+            f"{IG_GRAPH_URL}/me",
             params={
-                "fields": "id,name,accounts{id,name,access_token,instagram_business_account{id,username,name}}",
+                "fields": "id,username,name",
                 "access_token": access_token,
             },
         )
     me_data = me_resp.json()
-    logger.info("Facebook /me response: %s", me_data)
+    logger.info("Instagram /me: %s", me_data)
 
-    meta_user_id = me_data.get("id")
-    fb_user_name = me_data.get("name", "Unknown")
-    pages = me_data.get("accounts", {}).get("data", [])
+    ig_biz_id = me_data.get("id") or ig_user_id_fallback
+    ig_username = me_data.get("username")
 
-    if not pages:
-        raise HTTPException(
-            status_code=400,
-            detail="Nenhuma Página do Facebook encontrada. Crie uma Página primeiro.",
-        )
-
-    page = pages[0]
-    page_id = page["id"]
-    page_name = page.get("name", "")
-    page_access_token = page.get("access_token", access_token)
-
-    ig_biz_id: str | None = None
-    ig_username: str | None = None
-    ig_name: str | None = None
-    if "instagram_business_account" in page:
-        ig_biz = page["instagram_business_account"]
-        ig_biz_id = ig_biz.get("id")
-        ig_username = ig_biz.get("username")
-        ig_name = ig_biz.get("name")
-
-    # --- Verify state and find tenant ---
+    # Verifica state e acha o tenant
     if not state:
         raise HTTPException(status_code=400, detail="Missing state parameter.")
 
@@ -151,7 +150,7 @@ async def instagram_callback(
     if not account:
         raise HTTPException(status_code=404, detail="Conta não encontrada.")
 
-    # --- Upsert MetaConnection ---
+    # Upsert MetaConnection
     conn_result = await db.execute(
         select(MetaConnection).where(
             MetaConnection.account_id == tenant_account_id,
@@ -159,7 +158,6 @@ async def instagram_callback(
         )
     )
     connection = conn_result.scalar_one_or_none()
-
     encrypted_token = encrypt_token(access_token)
 
     if connection:
@@ -186,6 +184,6 @@ async def instagram_callback(
 
     frontend_url = "http://localhost:5173"
     return RedirectResponse(
-        url=f"{frontend_url}/app/conexao?instagram=connected&success=true",
+        url=f"{frontend_url}/oauth/success?provider=instagram&username={ig_username or ''}",
         status_code=302,
     )

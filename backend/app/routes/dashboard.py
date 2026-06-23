@@ -18,7 +18,9 @@ from app.models.automation import Customer, Sale
 from app.models.video import VideoGeneration, CreditUsage, Alert
 from app.schemas import (
     DashboardResponse, PerformancePoint, RecentActivity, AlertResponse,
+    AgencyDashboardResponse, AgencyClientStat,
 )
+from app.models.meta_connection import MetaConnection, PROVIDER_INSTAGRAM, STATUS_ACTIVE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -322,6 +324,84 @@ async def get_dashboard(
         performance=performance_data[:30],
         recent_activity=recent_activity[:10],
         alerts=alerts[:5],
+    )
+
+
+@router.get("/agency", response_model=AgencyDashboardResponse)
+async def get_agency_dashboard(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Dashboard consolidado para agências: agrega métricas de todos os sub-clientes."""
+    now = datetime.now(timezone.utc)
+    seven_days_ago = now - timedelta(days=7)
+
+    sub_accounts_result = await db.execute(
+        select(Account).where(Account.parent_account_id == current_user.tenant_id)
+    )
+    sub_accounts = sub_accounts_result.scalars().all()
+
+    client_stats: list[AgencyClientStat] = []
+    total_leads = 0
+    total_converted = 0
+    total_new_7d = 0
+
+    for acc in sub_accounts:
+        leads_count_result = await db.execute(
+            select(func.count(Lead.id)).where(Lead.account_id == acc.id)
+        )
+        leads_n = leads_count_result.scalar() or 0
+
+        converted_result = await db.execute(
+            select(func.count(Lead.id)).where(
+                Lead.account_id == acc.id,
+                Lead.status == "converted",
+            )
+        )
+        converted_n = converted_result.scalar() or 0
+
+        new_7d_result = await db.execute(
+            select(func.count(Lead.id)).where(
+                Lead.account_id == acc.id,
+                Lead.captured_at >= seven_days_ago,
+            )
+        )
+        new_7d = new_7d_result.scalar() or 0
+
+        ig_result = await db.execute(
+            select(MetaConnection).where(
+                MetaConnection.account_id == acc.id,
+                MetaConnection.provider == PROVIDER_INSTAGRAM,
+                MetaConnection.status == STATUS_ACTIVE,
+            )
+        )
+        ig_connected = ig_result.scalar_one_or_none() is not None
+
+        total_leads += leads_n
+        total_converted += converted_n
+        total_new_7d += new_7d
+
+        client_stats.append(
+            AgencyClientStat(
+                id=acc.id,
+                brand_name=acc.brand_name,
+                is_active=acc.is_active,
+                leads=leads_n,
+                converted=converted_n,
+                conversion_rate=round(converted_n / leads_n * 100, 1) if leads_n > 0 else 0.0,
+                new_leads_7d=new_7d,
+                instagram_connected=ig_connected,
+            )
+        )
+
+    return AgencyDashboardResponse(
+        total_clients=len(sub_accounts),
+        active_clients=sum(1 for a in sub_accounts if a.is_active),
+        total_leads=total_leads,
+        total_converted=total_converted,
+        overall_conversion_rate=round(total_converted / total_leads * 100, 1) if total_leads > 0 else 0.0,
+        new_leads_7d=total_new_7d,
+        clients=client_stats,
     )
 
 
