@@ -36,12 +36,12 @@ async def get_dashboard(
     thirty_days_ago = now - timedelta(days=30)
 
     total_leads_result = await db.execute(
-        select(func.count(Lead.id)).where(Lead.tenant_id == account_id)
+        select(func.count(Lead.id)).where(Lead.account_id == account_id)
     )
     total_leads = total_leads_result.scalar() or 0
 
     total_customers_result = await db.execute(
-        select(func.count(Customer.id)).where(Customer.tenant_id == account_id)
+        select(func.count(Customer.id)).where(Customer.account_id == account_id)
     )
     total_customers = total_customers_result.scalar() or 0
 

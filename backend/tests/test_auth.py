@@ -81,8 +81,23 @@ def test_decrypt_wrong_key():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_connections_empty_for_unknown_account(client):
-    resp = await client.get("/api/v1/auth/meta/connections", params={"account_id": "nonexistent"})
+async def test_connections_empty_for_unknown_account(client, db_session):
+    from app.core.security import create_access_token, hash_password
+    from app.models.account import Account
+    from app.models.user import User
+    import uuid
+    tid = str(uuid.uuid4())
+    acc = Account(id=tid, brand_name="Test")
+    db_session.add(acc)
+    usr = User(id="test-user", tenant_id=tid, username="test@u.com", password_hash=hash_password("x"), role="admin")
+    db_session.add(usr)
+    await db_session.flush()
+    token = create_access_token("test-user", tid, "admin")
+    resp = await client.get(
+        "/api/v1/auth/meta/connections",
+        params={"account_id": tid},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert resp.status_code == 200
     assert resp.json() == []
 

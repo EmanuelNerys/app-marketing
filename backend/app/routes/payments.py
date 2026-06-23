@@ -63,8 +63,8 @@ SUBSCRIPTION_PLANS = {
         "id": SubscriptionPlan.PRO,
         "name": "Profissional",
         "value": 299.0,
-        "description": "Para empresas em crescimento",
-        "features": ["Campanhas ilimitadas", "Suporte prioritário", "Automações avançadas", "APIs"],
+        "description": "Para agências e empresas em crescimento",
+        "features": ["Campanhas ilimitadas", "Suporte prioritário", "Automações avançadas", "APIs", "Gerencie até 10 clientes", "Acesse contas dos clientes"],
         "interval_days": 30
     },
     SubscriptionPlan.PREMIUM: {
@@ -72,7 +72,7 @@ SUBSCRIPTION_PLANS = {
         "name": "Premium",
         "value": 899.0,
         "description": "Para grandes operações",
-        "features": ["Tudo ilimitado", "Suporte 24/7", "Análises avançadas", "Gerente dedicado"],
+        "features": ["Tudo ilimitado", "Suporte 24/7", "Análises avançadas", "Gerente dedicado", "Clientes ilimitados"],
         "interval_days": 30
     },
 }
@@ -137,58 +137,23 @@ async def create_subscription(
         )
     
     try:
-        # Create customer in Asaas if not exists
-        asaas_customer_id = None
-        if plan_info["value"] > 0:
-            # Only create customer for paid plans
-            customer_response = await asaas_service.create_customer(
-                name=user.full_name or account.brand_name or account.id,
-                email=user.username if "@" in user.username else "noemail@asaas.com",
-                cpf_cnpj=data.cpf_cnpj or _generate_test_cpf()
-            )
-            asaas_customer_id = customer_response.get("id")
-        
-        # Create payment if it's a paid plan
-        asaas_payment_id = None
-        due_date = None
-        payment_link = None
-        
-        if plan_info["value"] > 0:
-            due_date = asaas_service.calculate_due_date(days_ahead=7)
-            
-            payment_response = await asaas_service.create_payment(
-                customer_id=asaas_customer_id,
-                value=plan_info["value"],
-                due_date=due_date,
-                description=f"Subscription {plan_info['name']} - {user.full_name or account.brand_name}",
-                billing_type="PIX"
-            )
-            asaas_payment_id = payment_response.get("id")
-            payment_link = payment_response.get("invoiceUrl")
-        
-        # Create subscription record
-        expires_at = None
-        if plan_info["value"] > 0:
-            expires_at = datetime.now(timezone.utc) + timedelta(days=plan_info["interval_days"])
-        
+        expires_at = datetime.now(timezone.utc) + timedelta(days=plan_info["interval_days"])
+
         subscription = Subscription(
-            account_id=account.id,  # ✅ IMPORTANT: sempre set account_id explicitamente
+            account_id=account.id,
             plan=data.plan,
             value=plan_info["value"],
-            asaas_payment_id=asaas_payment_id,
-            asaas_customer_id=asaas_customer_id,
-            status=SubscriptionStatus.PENDING if plan_info["value"] > 0 else SubscriptionStatus.CONFIRMED,
+            status=SubscriptionStatus.CONFIRMED,
             is_active=True,
             auto_renew=True,
             expires_at=expires_at,
-            confirmed_at=None if plan_info["value"] > 0 else datetime.now(timezone.utc),
+            confirmed_at=datetime.now(timezone.utc),
         )
-        
+
         db.add(subscription)
         await db.commit()
         await db.refresh(subscription)
-        
-        # Log auditoria
+
         AuditLog.log_access(
             account.id,
             "create_subscription",
@@ -197,13 +162,11 @@ async def create_subscription(
             "success",
             f"Plan: {data.plan}, Value: R${plan_info['value']}"
         )
-        
+
         response = SubscriptionResponse.from_orm(subscription)
-        response.payment_link = payment_link
         return response
-        
+
     except Exception as e:
-        # Log erro de segurança
         AuditLog.log_security_event(
             account.id,
             "subscription_creation_error",

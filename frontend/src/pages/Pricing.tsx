@@ -67,11 +67,9 @@ export default function Pricing() {
         plan: planId,
       });
 
-      // If there's a payment link, redirect to it
       if (response.data.payment_link) {
         window.location.href = response.data.payment_link;
       } else {
-        // For free plans, just show success
         alert('Bem-vindo ao plano ' + plans.find(p => p.id === planId)?.name + '!');
         fetchCurrentSubscription();
       }
@@ -85,48 +83,44 @@ export default function Pricing() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-lg">Carregando planos...</div>
+      <div className="flex items-center justify-center min-h-screen bg-[#0a0a0f]">
+        <div className="text-[#555]">Carregando planos...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 py-12 px-4">
+    <div className="min-h-screen bg-[#0a0a0f] py-12 px-4">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-white mb-4">Planos e Preços</h1>
-          <p className="text-xl text-slate-300">
+          <p className="text-[#555]">
             Escolha o plano perfeito para suas necessidades
           </p>
         </div>
 
-        {/* Current Subscription Info */}
         {currentSubscription && (
-          <div className="mb-8 p-4 bg-green-900/30 border border-green-500 rounded-lg">
-            <p className="text-white">
+          <div className="mb-8 p-4 bg-green-900/20 border border-green-500/20 rounded-lg text-center">
+            <p className="text-green-400">
               ✓ Você está no plano{' '}
               <strong>{plans.find(p => p.id === currentSubscription.plan)?.name}</strong>
             </p>
           </div>
         )}
 
-        {/* Plans Grid */}
         <div className="grid md:grid-cols-4 gap-6 mb-12">
           {plans.map((plan) => (
             <div
               key={plan.id}
-              className={`relative rounded-lg overflow-hidden transition-all duration-300 ${
+              className={`rounded-xl border overflow-hidden transition-all duration-300 ${
                 currentSubscription?.plan === plan.id
-                  ? 'ring-2 ring-blue-500 shadow-2xl'
-                  : 'hover:shadow-xl'
+                  ? 'border-indigo-500 shadow-xl shadow-indigo-900/20'
+                  : 'border-white/[0.06] hover:border-white/[0.12]'
               }`}
             >
-              <div className="bg-slate-800 p-6 h-full flex flex-col">
-                {/* Badge */}
+              <div className="bg-[#111118] p-6 h-full flex flex-col">
                 {plan.id === 'premium' && (
-                  <div className="absolute top-0 right-0 bg-yellow-500 text-slate-900 px-3 py-1 text-xs font-bold rounded-bl-lg">
+                  <div className="absolute top-0 right-0 bg-indigo-600 text-white px-3 py-1 text-xs font-bold rounded-bl-lg">
                     MAIS POPULAR
                   </div>
                 )}
@@ -137,33 +131,29 @@ export default function Pricing() {
                   </div>
                 )}
 
-                {/* Plan Name */}
                 <h3 className="text-2xl font-bold text-white mb-2">{plan.name}</h3>
-                <p className="text-slate-300 text-sm mb-4">{plan.description}</p>
+                <p className="text-[#555] text-sm mb-4">{plan.description}</p>
 
-                {/* Price */}
                 <div className="mb-6">
                   <div className="text-4xl font-bold text-white">
                     R$ {plan.value === 0 ? '0' : plan.value.toFixed(0)}
                   </div>
-                  <p className="text-slate-400 text-sm">
+                  <p className="text-[#444] text-sm">
                     {plan.value > 0 ? '/mês' : 'Para sempre'}
                   </p>
                 </div>
 
-                {/* Features */}
                 <div className="mb-8 flex-grow">
                   <ul className="space-y-3">
                     {plan.features.map((feature, idx) => (
                       <li key={idx} className="flex items-start">
                         <span className="text-green-400 mr-3">✓</span>
-                        <span className="text-slate-300 text-sm">{feature}</span>
+                        <span className="text-[#666] text-sm">{feature}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
 
-                {/* CTA Button */}
                 <button
                   onClick={() => handleSubscribe(plan.id)}
                   disabled={
@@ -174,12 +164,12 @@ export default function Pricing() {
                   className={`w-full py-3 rounded-lg font-semibold transition-all duration-200 ${
                     currentSubscription?.plan === plan.id &&
                     currentSubscription?.is_active
-                      ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                      ? 'bg-white/[0.04] text-[#555] cursor-not-allowed'
                       : selectedPlan === plan.id
-                      ? 'bg-slate-600 text-white cursor-wait'
+                      ? 'bg-white/[0.04] text-[#666] cursor-wait'
                       : plan.id === 'premium'
-                      ? 'bg-yellow-500 text-slate-900 hover:bg-yellow-600'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                      ? 'bg-indigo-600 text-white hover:bg-indigo-500'
+                      : 'bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600/20'
                   }`}
                 >
                   {selectedPlan === plan.id
@@ -194,33 +184,32 @@ export default function Pricing() {
           ))}
         </div>
 
-        {/* FAQ */}
-        <div className="bg-slate-800 rounded-lg p-8">
+        <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-8 max-w-2xl mx-auto">
           <h2 className="text-2xl font-bold text-white mb-6">Perguntas Frequentes</h2>
           <div className="space-y-4">
             <div>
-              <h3 className="text-white font-semibold mb-2">
+              <h3 className="text-[#e2e2e8] font-semibold mb-2">
                 Posso mudar de plano a qualquer momento?
               </h3>
-              <p className="text-slate-300">
+              <p className="text-[#555]">
                 Sim! Você pode fazer upgrade ou downgrade de plano a qualquer momento. A mudança
                 será refletida no próximo ciclo de cobrança.
               </p>
             </div>
             <div>
-              <h3 className="text-white font-semibold mb-2">
+              <h3 className="text-[#e2e2e8] font-semibold mb-2">
                 Há período de trial?
               </h3>
-              <p className="text-slate-300">
+              <p className="text-[#555]">
                 Sim, todos os planos pagos têm 7 dias de teste gratuito. Sem necessidade de cartão
                 de crédito.
               </p>
             </div>
             <div>
-              <h3 className="text-white font-semibold mb-2">
+              <h3 className="text-[#e2e2e8] font-semibold mb-2">
                 O que acontece se eu cancelar?
               </h3>
-              <p className="text-slate-300">
+              <p className="text-[#555]">
                 Você pode cancelar a qualquer momento. O acesso permanecerá até o final do período
                 pago.
               </p>

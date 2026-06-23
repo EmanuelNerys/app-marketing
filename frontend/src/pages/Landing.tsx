@@ -12,9 +12,46 @@ interface Plan {
 }
 
 const faq = [
-  { q: 'Como funciona a captura de leads pelo Instagram?', a: 'Nosso sistema monitora comentários e mensagens da sua página do Instagram. Quando um seguidor comenta com a palavra-chave que você definiu, automaticamente salvamos o lead e enviamos uma mensagem personalizada.' },
-  { q: 'Preciso ter uma página do Facebook?', a: 'Sim, o Instagram Business exige uma página do Facebook vinculada. O processo de conexão é simples e leva menos de 2 minutos.' },
-  { q: 'Posso cancelar a qualquer momento?', a: 'Sim! Você pode cancelar sua assinatura quando quiser, sem multas ou taxas. Seus dados ficam salvos por 30 dias após o cancelamento.' },
+  {
+    q: 'Como funciona a captura de leads pelo Instagram?',
+    a: 'Nosso sistema monitora comentários e mensagens da sua página do Instagram. Quando um seguidor comenta com a palavra-chave que você definiu, salvamos o lead automaticamente e enviamos uma mensagem personalizada em segundos.',
+  },
+  {
+    q: 'Preciso ter uma página do Facebook?',
+    a: 'Sim, o Instagram Business exige uma página do Facebook vinculada. O processo de conexão é simples e leva menos de 2 minutos.',
+  },
+  {
+    q: 'Posso cancelar a qualquer momento?',
+    a: 'Sim. Cancele quando quiser, sem multas ou taxas. Seus dados ficam salvos por 30 dias após o cancelamento.',
+  },
+]
+
+const stats = [
+  { value: '+12.000', label: 'Leads captados' },
+  { value: '98%', label: 'Taxa de entrega' },
+  { value: '< 5s', label: 'Resposta automática' },
+  { value: '4.8 ⭐', label: 'Avaliação média' },
+]
+
+const steps = [
+  {
+    num: '01',
+    icon: '🔗',
+    title: 'Conecte sua conta',
+    desc: 'Vincule seu Instagram Business ao painel com um clique. Seguro, rápido e sem complicação.',
+  },
+  {
+    num: '02',
+    icon: '⚡',
+    title: 'Configure a palavra-chave',
+    desc: 'Defina a palavra gatilho (ex: "QUERO") e a mensagem automática que será enviada.',
+  },
+  {
+    num: '03',
+    icon: '📊',
+    title: 'Acompanhe os leads',
+    desc: 'Dashboard em tempo real. Veja cada contato capturado e acompanhe suas conversões.',
+  },
 ]
 
 const partners = ['Empresa A', 'Empresa B', 'Empresa C', 'Empresa D', 'Empresa E']
@@ -29,6 +66,7 @@ export default function Landing() {
   const [email, setEmail] = useState('')
   const [modalError, setModalError] = useState('')
   const [modalLoading, setModalLoading] = useState(false)
+  const [openFaq, setOpenFaq] = useState<number | null>(null)
 
   useEffect(() => {
     fetchPlans()
@@ -66,7 +104,7 @@ export default function Landing() {
       } else {
         navigate('/app')
       }
-    } catch (error) {
+    } catch {
       alert('Erro ao criar assinatura. Tente novamente.')
     } finally {
       setSelectedPlan(null)
@@ -95,141 +133,235 @@ export default function Landing() {
     }
   }
 
+  const paidPlans = plans.filter((p) => p.value > 0)
+  const freePlans = plans.filter((p) => p.value === 0)
+
   return (
-    <div className="min-h-screen bg-surface text-dark-600">
+    <div className="min-h-screen bg-[#0a0a0f] text-[#e2e2e8]">
 
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-900/40 via-surface to-dark pointer-events-none" />
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, #4f46e5 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
-        <div className="max-w-6xl mx-auto px-4 py-20 md:py-32 relative z-10">
-          <div className="flex items-center justify-between mb-12">
-            <button onClick={() => navigate('/')} className="text-2xl font-bold text-white hover:text-brand-400 transition-colors">adStudioAI</button>
-            <div className="flex gap-3">
-              <button onClick={() => navigate('/login')} className="px-5 py-2 text-sm font-medium text-dark-400 hover:text-white transition-colors">Entrar</button>
-              <button onClick={() => navigate('/login')} className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-md">Começar Grátis</button>
-            </div>
+      {/* ── NAV ─────────────────────────────────────────── */}
+      <nav className="sticky top-0 z-40 flex items-center justify-between px-6 md:px-10 py-4 border-b border-white/[0.06] bg-[#0a0a0f]/90 backdrop-blur-md">
+        <button
+          onClick={() => navigate('/')}
+          className="text-base font-semibold text-white tracking-tight hover:opacity-80 transition-opacity"
+        >
+          ad<span className="text-indigo-400">Studio</span>AI
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/login')}
+            className="px-4 py-2 text-sm text-[#666] hover:text-white transition-colors"
+          >
+            Entrar
+          </button>
+          <button
+            onClick={() => navigate('/login')}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Começar grátis
+          </button>
+        </div>
+      </nav>
+
+      {/* ── HERO ─────────────────────────────────────────── */}
+      <section className="relative px-6 md:px-10 pt-20 pb-16 md:pt-28 md:pb-20 overflow-hidden">
+        {/* subtle grid bg */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-[0.025]"
+          style={{
+            backgroundImage: 'radial-gradient(circle, #818cf8 1px, transparent 1px)',
+            backgroundSize: '40px 40px',
+          }}
+        />
+        {/* glow */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-indigo-600/10 blur-[100px] pointer-events-none" />
+
+        <div className="relative max-w-3xl mx-auto text-center">
+          {/* badge */}
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-medium mb-8">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+            Automação de marketing para Instagram
           </div>
-          <div className="max-w-3xl mx-auto text-center">
-            <span className="inline-block px-4 py-1.5 bg-brand-600/20 text-brand-400 text-xs font-semibold rounded-full mb-6 border border-brand-600/30">#1 em automação de marketing para Instagram</span>
-            <h2 className="text-4xl md:text-6xl font-bold text-white leading-tight mb-6">
-              Transforme seguidores em{' '}
-              <span className="text-brand-400">clientes reais</span>
-            </h2>
-            <p className="text-lg md:text-xl text-dark-400 max-w-2xl mx-auto mb-8">
-              Automatize a captação de leads pelo Instagram. Conecte sua conta, defina palavras-chave e deixe o resto com a gente. Enquanto você dorme, seu funil de vendas trabalha.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <button onClick={() => navigate('/login')} className="px-8 py-3.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-brand-600/25 text-lg">Quero Automatizar Minhas Vendas</button>
-              <button onClick={() => document.getElementById('planos')?.scrollIntoView({ behavior: 'smooth' })} className="px-8 py-3.5 border border-dark-50 text-dark-400 hover:text-white hover:border-dark-200 font-semibold rounded-xl transition-colors text-lg">Ver Planos</button>
-            </div>
-            <p className="text-dark-300 text-sm mt-4">⏱️ Conexão em menos de 2 minutos. Sem cartão de crédito.</p>
+
+          <h1 className="text-4xl md:text-6xl font-bold text-white leading-[1.05] tracking-tight mb-5">
+            Seguidores que viram{' '}
+            <span className="text-indigo-400">clientes reais</span>
+          </h1>
+
+          <p className="text-base md:text-lg text-[#666] max-w-xl mx-auto leading-relaxed mb-10">
+            Capture leads automaticamente quando alguém comenta na sua publicação.
+            Configure em 2 minutos — depois é só acompanhar o funil crescer.
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <button
+              onClick={() => navigate('/login')}
+              className="w-full sm:w-auto px-7 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition-colors text-sm shadow-lg shadow-indigo-600/20"
+            >
+              Automatizar minhas vendas →
+            </button>
+            <button
+              onClick={() => document.getElementById('planos')?.scrollIntoView({ behavior: 'smooth' })}
+              className="w-full sm:w-auto px-7 py-3.5 border border-white/10 text-[#888] hover:text-white hover:border-white/20 font-medium rounded-xl transition-colors text-sm"
+            >
+              Ver planos
+            </button>
           </div>
+          <p className="text-xs text-[#3a3a45] mt-4">
+            Sem cartão de crédito · 7 dias grátis · Cancele quando quiser
+          </p>
         </div>
       </section>
 
-      <section className="border-y border-dark-50">
-        <div className="max-w-6xl mx-auto px-4 py-12 grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-          {[
-            { value: '+12.000', label: 'Leads captados' },
-            { value: '98%', label: 'Taxa de entrega' },
-            { value: '< 5s', label: 'Tempo de resposta' },
-            { value: '4.8', label: 'Avaliação média ⭐' },
-          ].map((item) => (
-            <div key={item.label}>
-              <p className="text-3xl md:text-4xl font-bold text-white">{item.value}</p>
-              <p className="text-dark-400 text-sm mt-1">{item.label}</p>
+      {/* ── STATS ─────────────────────────────────────────── */}
+      <div className="border-y border-white/[0.06]">
+        <div className="max-w-5xl mx-auto px-6 md:px-10 grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-white/[0.06]">
+          {stats.map((s) => (
+            <div key={s.label} className="px-6 py-8 text-center">
+              <p className="text-3xl font-bold text-white tracking-tight">{s.value}</p>
+              <p className="text-xs text-[#555] mt-1.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── HOW IT WORKS ─────────────────────────────────── */}
+      <section className="max-w-5xl mx-auto px-6 md:px-10 py-20 md:py-24">
+        <p className="text-xs font-semibold text-indigo-400 tracking-widest uppercase mb-3">Como funciona</p>
+        <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight mb-2">
+          Três passos, zero esforço
+        </h2>
+        <p className="text-sm text-[#555] mb-10 max-w-md">
+          Configure uma vez e deixe a automação trabalhar enquanto você foca no que importa.
+        </p>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          {steps.map((s) => (
+            <div
+              key={s.num}
+              className="relative bg-[#111118] border border-white/[0.06] rounded-xl p-6 overflow-hidden group hover:border-indigo-500/30 transition-colors"
+            >
+              {/* top accent line */}
+              <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-indigo-500 to-transparent" />
+              <span className="text-[10px] font-bold text-indigo-400 tracking-widest">{s.num}</span>
+              <div className="text-2xl my-3">{s.icon}</div>
+              <h3 className="text-sm font-semibold text-[#e2e2e8] mb-2">{s.title}</h3>
+              <p className="text-xs text-[#555] leading-relaxed">{s.desc}</p>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="max-w-6xl mx-auto px-4 py-20">
-        <h3 className="text-3xl font-bold text-white text-center mb-4">Como funciona</h3>
-        <p className="text-dark-400 text-center max-w-xl mx-auto mb-12">Três passos simples para nunca mais perder uma venda no Instagram.</p>
-        <div className="grid md:grid-cols-3 gap-6">
-          {[
-            { step: '01', title: 'Conecte sua conta', desc: 'Vincule sua página do Facebook/Instagram com um clique. Seguro e rápido.' },
-            { step: '02', title: 'Configure a automação', desc: 'Defina a palavra-chave (ex: "QUERO") e a mensagem de resposta automática.' },
-            { step: '03', title: 'Acompanhe os leads', desc: 'Receba leads no dashboard, acompanhe conversões e veja seu faturamento crescer.' },
-          ].map((item) => (
-            <div key={item.step} className="bg-surface-card border border-dark-50 rounded-xl p-6 hover:border-brand-600/40 transition-colors">
-              <span className="text-brand-400 text-sm font-bold">{item.step}</span>
-              <h4 className="text-lg font-semibold text-white mt-2 mb-2">{item.title}</h4>
-              <p className="text-dark-400 text-sm">{item.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="border-y border-dark-50 py-12">
-        <div className="max-w-6xl mx-auto px-4 text-center">
-          <p className="text-dark-400 text-sm mb-6">Empresas que confiam no adStudioAI</p>
-          <div className="flex flex-wrap justify-center gap-8 gap-y-4">
-            {partners.map((name) => (
-              <div key={name} className="px-6 py-3 bg-surface-card border border-dark-50 rounded-lg">
-                <span className="text-dark-300 text-sm font-medium">{name}</span>
+      {/* ── PARTNERS ─────────────────────────────────────── */}
+      <div className="border-y border-white/[0.06] py-10">
+        <div className="max-w-5xl mx-auto px-6 md:px-10 text-center">
+          <p className="text-xs text-[#3a3a45] mb-6 tracking-widest uppercase">Empresas que confiam no adStudioAI</p>
+          <div className="flex flex-wrap justify-center gap-3">
+            {partners.map((p) => (
+              <div
+                key={p}
+                className="px-5 py-2.5 bg-[#111118] border border-white/[0.06] rounded-lg"
+              >
+                <span className="text-xs text-[#444] font-medium">{p}</span>
               </div>
             ))}
           </div>
         </div>
-      </section>
+      </div>
 
-      <section id="planos" className="bg-dark py-20">
-        <div className="max-w-6xl mx-auto px-4">
-          <h3 className="text-3xl font-bold text-white text-center mb-4">Planos para todo negócio</h3>
-          <p className="text-dark-400 text-center max-w-xl mx-auto mb-12">Escolha o plano ideal para o seu momento. Todos incluem 7 dias de teste grátis.</p>
+      {/* ── PLANS ─────────────────────────────────────────── */}
+      <section id="planos" className="bg-[#07070d] border-b border-white/[0.06] py-20 md:py-24">
+        <div className="max-w-5xl mx-auto px-6 md:px-10">
+          <p className="text-xs font-semibold text-indigo-400 tracking-widest uppercase mb-3 text-center">Planos</p>
+          <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight text-center mb-2">
+            Para todo tipo de negócio
+          </h2>
+          <p className="text-sm text-[#555] text-center mb-12 max-w-sm mx-auto">
+            Todos incluem 7 dias de teste gratuito. Cancele quando quiser.
+          </p>
+
           {plans.length === 0 ? (
-            <p className="text-dark-400 text-center">Carregando planos...</p>
+            <p className="text-center text-[#444] text-sm">Carregando planos...</p>
           ) : (
-            <div className="grid md:grid-cols-3 gap-6">
-              {plans.filter(p => p.value > 0).map((plan, index) => (
-                <div key={plan.id} className={`rounded-xl border p-6 flex flex-col ${index === 1 ? 'bg-brand-600 border-brand-500 shadow-xl shadow-brand-600/20 scale-105' : 'bg-surface-card border-dark-50'}`}>
-                  {index === 1 && <span className="text-white text-xs font-semibold bg-white/20 rounded-full px-3 py-1 w-fit mb-3">Mais popular</span>}
-                  <h4 className="text-xl font-bold text-white">{plan.name}</h4>
-                  <p className={`text-sm mt-1 ${index === 1 ? 'text-white/80' : 'text-dark-400'}`}>{plan.description}</p>
-                  <div className="mt-4 mb-6">
-                    <span className="text-4xl font-bold text-white">R$ {plan.value.toFixed(0)}</span>
-                    <span className={`text-sm ${index === 1 ? 'text-white/70' : 'text-dark-400'}`}>/mês</span>
+            <div className="grid md:grid-cols-3 gap-4">
+              {/* paid plans */}
+              {paidPlans.map((plan, index) => {
+                const featured = index === 1
+                return (
+                  <div
+                    key={plan.id}
+                    className={`rounded-xl p-6 flex flex-col border transition-all ${
+                      featured
+                        ? 'bg-[#1a1850] border-indigo-500/40 shadow-xl shadow-indigo-900/20 md:-translate-y-1'
+                        : 'bg-[#111118] border-white/[0.06] hover:border-white/[0.12]'
+                    }`}
+                  >
+                    {featured && (
+                      <span className="text-[10px] font-semibold text-indigo-400 bg-indigo-500/15 rounded-full px-3 py-1 w-fit mb-4">
+                        Mais popular
+                      </span>
+                    )}
+                    <h3 className="text-base font-bold text-white">{plan.name}</h3>
+                    <p className={`text-xs mt-1 mb-5 ${featured ? 'text-indigo-300/60' : 'text-[#555]'}`}>
+                      {plan.description}
+                    </p>
+                    <div className="mb-6">
+                      <span className="text-3xl font-bold text-white tracking-tight">
+                        R$ {plan.value.toFixed(0)}
+                      </span>
+                      <span className={`text-xs ml-1 ${featured ? 'text-indigo-300/50' : 'text-[#444]'}`}>/mês</span>
+                    </div>
+                    <ul className="space-y-2.5 mb-8 flex-1">
+                      {plan.features.map((f) => (
+                        <li
+                          key={f}
+                          className={`flex items-start gap-2 text-xs ${featured ? 'text-indigo-200/70' : 'text-[#666]'}`}
+                        >
+                          <span className="text-indigo-400 mt-px shrink-0">✓</span>
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      onClick={() => handlePlanClick(plan.id)}
+                      disabled={selectedPlan !== null}
+                      className={`w-full py-2.5 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                        featured
+                          ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                          : 'bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400'
+                      }`}
+                    >
+                      {selectedPlan === plan.id ? 'Redirecionando...' : 'Assinar agora'}
+                    </button>
                   </div>
-                  <ul className="space-y-3 mb-8 flex-1">
+                )
+              })}
+
+              {/* free plans */}
+              {freePlans.map((plan) => (
+                <div
+                  key={plan.id}
+                  className="rounded-xl p-6 flex flex-col bg-[#111118] border border-white/[0.06] hover:border-white/[0.12] transition-colors"
+                >
+                  <h3 className="text-base font-bold text-white">{plan.name}</h3>
+                  <p className="text-xs text-[#555] mt-1 mb-5">{plan.description}</p>
+                  <div className="mb-6">
+                    <span className="text-3xl font-bold text-white">Grátis</span>
+                  </div>
+                  <ul className="space-y-2.5 mb-8 flex-1">
                     {plan.features.map((f) => (
-                      <li key={f} className={`flex items-center gap-2 text-sm ${index === 1 ? 'text-white/90' : 'text-dark-400'}`}>
-                        <span className="text-brand-400">✓</span>
+                      <li key={f} className="flex items-start gap-2 text-xs text-[#666]">
+                        <span className="text-indigo-400 mt-px shrink-0">✓</span>
                         {f}
                       </li>
                     ))}
                   </ul>
                   <button
-                    onClick={() => handlePlanClick(plan.id)}
-                    disabled={selectedPlan !== null}
-                    className={`w-full py-3 font-semibold rounded-xl transition-colors text-sm ${
-                      selectedPlan === plan.id
-                        ? 'bg-opacity-50 cursor-wait'
-                        : index === 1
-                        ? 'bg-white text-brand-700 hover:bg-white/90'
-                        : 'bg-brand-600 hover:bg-brand-700 text-white'
-                    } ${selectedPlan !== null ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onClick={() => navigate('/login')}
+                    className="w-full py-2.5 text-sm font-semibold rounded-lg bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 transition-colors"
                   >
-                    {selectedPlan === plan.id ? 'Redirecionando...' : 'Assinar Agora'}
+                    Começar grátis
                   </button>
-                </div>
-              ))}
-              {plans.filter(p => p.value === 0).map(plan => (
-                <div key={plan.id} className="rounded-xl border p-6 flex flex-col bg-surface-card border-dark-50">
-                  <h4 className="text-xl font-bold text-white">{plan.name}</h4>
-                  <p className="text-sm mt-1 text-dark-400">{plan.description}</p>
-                  <div className="mt-4 mb-6">
-                    <span className="text-4xl font-bold text-white">Grátis</span>
-                  </div>
-                  <ul className="space-y-3 mb-8 flex-1">
-                    {plan.features.map((f) => (
-                      <li key={f} className="flex items-center gap-2 text-sm text-dark-400">
-                        <span className="text-brand-400">✓</span>
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                  <button onClick={() => navigate('/login')} className="w-full py-3 font-semibold rounded-xl transition-colors text-sm bg-brand-600 hover:bg-brand-700 text-white">Começar Grátis</button>
                 </div>
               ))}
             </div>
@@ -237,87 +369,126 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="max-w-3xl mx-auto px-4 py-20">
-        <h3 className="text-3xl font-bold text-white text-center mb-12">Dúvidas frequentes</h3>
-        <div className="space-y-4">
-          {faq.map((item) => (
-            <details key={item.q} className="bg-surface-card border border-dark-50 rounded-xl p-5 group">
-              <summary className="text-white font-medium cursor-pointer list-none flex items-center justify-between">
+      {/* ── FAQ ─────────────────────────────────────────── */}
+      <section className="max-w-2xl mx-auto px-6 md:px-10 py-20 md:py-24">
+        <p className="text-xs font-semibold text-indigo-400 tracking-widest uppercase mb-3">Dúvidas</p>
+        <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight mb-10">
+          Perguntas frequentes
+        </h2>
+        <div className="space-y-2">
+          {faq.map((item, i) => (
+            <div
+              key={item.q}
+              className="border border-white/[0.06] rounded-xl overflow-hidden"
+            >
+              <button
+                onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                className="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium text-[#ccc] hover:text-white transition-colors"
+              >
                 {item.q}
-                <span className="text-dark-400 group-open:rotate-180 transition-transform">▼</span>
-              </summary>
-              <p className="text-dark-400 text-sm mt-3 leading-relaxed">{item.a}</p>
-            </details>
+                <span
+                  className={`text-[#444] text-xs ml-4 shrink-0 transition-transform duration-200 ${
+                    openFaq === i ? 'rotate-180' : ''
+                  }`}
+                >
+                  ▼
+                </span>
+              </button>
+              {openFaq === i && (
+                <div className="px-5 pb-4 text-xs text-[#555] leading-relaxed border-t border-white/[0.04] pt-4">
+                  {item.a}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       </section>
 
-      <section className="border-t border-dark-50">
-        <div className="max-w-3xl mx-auto px-4 py-16 text-center">
-          <h3 className="text-3xl font-bold text-white mb-4">Pronto para transformar seu Instagram em máquina de vendas?</h3>
-          <p className="text-dark-400 mb-8">Mais de 200 empresas já automatizam a captação de leads com a gente.</p>
-          <button onClick={() => navigate('/login')} className="px-8 py-3.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-brand-600/25 text-lg">Começar Agora — é Grátis</button>
-          <p className="text-dark-300 text-xs mt-4">7 dias de teste. Sem compromisso. Sem cartão de crédito.</p>
+      {/* ── CTA FINAL ─────────────────────────────────────── */}
+      <section className="border-t border-white/[0.06]">
+        <div className="max-w-2xl mx-auto px-6 md:px-10 py-20 md:py-24 text-center">
+          <h2 className="text-2xl md:text-4xl font-bold text-white tracking-tight leading-tight mb-4">
+            Pronto para transformar seu<br />Instagram em máquina de vendas?
+          </h2>
+          <p className="text-sm text-[#555] mb-8">
+            Mais de 200 empresas já automatizam a captação de leads com a gente.
+          </p>
+          <button
+            onClick={() => navigate('/login')}
+            className="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-indigo-600/20 text-sm"
+          >
+            Começar agora — é grátis
+          </button>
+          <p className="text-xs text-[#333] mt-4">7 dias de teste · Sem compromisso · Cancele quando quiser</p>
         </div>
       </section>
 
-      <footer className="border-t border-dark-50 py-8">
-        <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-dark-400 text-sm">© 2026 adStudioAI. Todos os direitos reservados.</p>
-          <div className="flex gap-6 text-dark-400 text-sm">
-            <span className="hover:text-white cursor-pointer transition-colors">Termos</span>
-            <span className="hover:text-white cursor-pointer transition-colors">Privacidade</span>
-            <span className="hover:text-white cursor-pointer transition-colors">Contato</span>
+      {/* ── FOOTER ─────────────────────────────────────────── */}
+      <footer className="border-t border-white/[0.06]">
+        <div className="max-w-5xl mx-auto px-6 md:px-10 py-6 flex flex-col md:flex-row items-center justify-between gap-3">
+          <p className="text-xs text-[#3a3a45]">© 2026 adStudioAI. Todos os direitos reservados.</p>
+          <div className="flex gap-5">
+            {['Termos', 'Privacidade', 'Contato'].map((l) => (
+              <span key={l} className="text-xs text-[#3a3a45] hover:text-white cursor-pointer transition-colors">
+                {l}
+              </span>
+            ))}
           </div>
         </div>
       </footer>
 
-      {/* Modal de cadastro pré-pagamento */}
+      {/* ── MODAL ─────────────────────────────────────────── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-surface-card border border-dark-50 rounded-2xl p-8 w-full max-w-md mx-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-8 w-full max-w-md">
             <div className="text-center mb-6">
-              <h3 className="text-xl font-bold text-white">Quase lá!</h3>
-              <p className="text-dark-400 text-sm mt-1">Preencha seus dados para seguir para o pagamento.</p>
+              <h3 className="text-lg font-bold text-white">Quase lá!</h3>
+              <p className="text-xs text-[#555] mt-1.5">Preencha seus dados para ir ao pagamento.</p>
             </div>
+
             <form onSubmit={handleModalSubmit} className="space-y-4">
               {modalError && (
-                <div className="bg-red-900/20 border border-red-900/40 text-red-400 text-sm rounded-lg px-4 py-3 text-center">{modalError}</div>
+                <div className="bg-red-900/20 border border-red-500/20 text-red-400 text-xs rounded-lg px-4 py-3 text-center">
+                  {modalError}
+                </div>
               )}
+
               <div>
-                <label className="block text-sm font-medium text-dark-500 mb-2">Nome completo</label>
+                <label className="block text-xs font-medium text-[#666] mb-1.5">Nome completo</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Seu nome"
-                  className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
+                  className="w-full px-4 py-2.5 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none placeholder-[#333] transition-colors"
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-dark-500 mb-2">Email</label>
+                <label className="block text-xs font-medium text-[#666] mb-1.5">Email</label>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu@email.com"
-                  className="w-full px-4 py-2.5 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
+                  className="w-full px-4 py-2.5 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none placeholder-[#333] transition-colors"
                 />
               </div>
+
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="flex-1 py-2.5 border border-dark-50 text-dark-400 hover:text-white font-semibold rounded-lg transition-colors"
+                  className="flex-1 py-2.5 border border-white/[0.08] text-[#666] hover:text-white text-sm font-medium rounded-lg transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={modalLoading}
-                  className="flex-1 py-2.5 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-600/50 text-white font-semibold rounded-lg transition-colors shadow-md"
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
                 >
-                  {modalLoading ? 'Redirecionando...' : 'Ir para Pagamento'}
+                  {modalLoading ? 'Redirecionando...' : 'Ir para pagamento'}
                 </button>
               </div>
             </form>

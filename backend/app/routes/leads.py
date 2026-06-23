@@ -22,7 +22,7 @@ async def list_leads(
 ):
     result = await db.execute(
         select(Lead)
-        .where(Lead.tenant_id == current_user.tenant_id)
+        .where(Lead.account_id == current_user.tenant_id)
         .order_by(Lead.captured_at.desc())
     )
     return result.scalars().all()
@@ -37,7 +37,7 @@ async def get_lead(
     result = await db.execute(
         select(Lead).where(
             Lead.id == lead_id,
-            Lead.tenant_id == current_user.tenant_id,
+            Lead.account_id == current_user.tenant_id,
         )
     )
     lead = result.scalar_one_or_none()
@@ -56,7 +56,7 @@ async def update_lead(
     result = await db.execute(
         select(Lead).where(
             Lead.id == lead_id,
-            Lead.tenant_id == current_user.tenant_id,
+            Lead.account_id == current_user.tenant_id,
         )
     )
     lead = result.scalar_one_or_none()
@@ -80,7 +80,7 @@ async def delete_lead(
     result = await db.execute(
         select(Lead).where(
             Lead.id == lead_id,
-            Lead.tenant_id == current_user.tenant_id,
+            Lead.account_id == current_user.tenant_id,
         )
     )
     lead = result.scalar_one_or_none()

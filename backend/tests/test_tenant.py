@@ -37,12 +37,23 @@ async def test_connections_isolated_by_account(db_session):
 
 @pytest.mark.asyncio
 async def test_api_connections_endpoint_isolates_tenant(client, db_session):
+    from app.core.security import create_access_token, hash_password
+    from app.models.account import Account
+    from app.models.user import User
+    acc = Account(id="tenant-alpha", brand_name="Alpha")
+    db_session.add(acc)
+    usr = User(id="u1", tenant_id="tenant-alpha", username="alpha@t.com", password_hash=hash_password("x"), role="admin")
+    db_session.add(usr)
     conn_a = _make_connection("tenant-alpha", "ads", "page-alpha")
     conn_b = _make_connection("tenant-beta", "ads", "page-beta")
     db_session.add_all([conn_a, conn_b])
     await db_session.flush()
 
-    resp = await client.get("/api/v1/auth/meta/connections", params={"account_id": "tenant-alpha"})
+    resp = await client.get(
+        "/api/v1/auth/meta/connections",
+        params={"account_id": "tenant-alpha"},
+        headers={"Authorization": f"Bearer {create_access_token('u1', 'tenant-alpha', 'admin')}"},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1

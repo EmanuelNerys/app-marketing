@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 
 type Provider = 'instagram' | 'whatsapp' | 'ads'
@@ -58,11 +59,20 @@ export default function ConexaoMeta() {
   const [connecting, setConnecting] = useState<Provider | null>(null)
   const [disconnecting, setDisconnecting] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [searchParams] = useSearchParams()
 
   useEffect(() => {
     if (accountId) loadConnections()
     else setLoading(false)
   }, [accountId])
+
+  useEffect(() => {
+    if (searchParams.get('instagram') === 'connected') {
+      setConnecting(null)
+      loadConnections()
+      window.history.replaceState({}, '', '/app/conexao')
+    }
+  }, [searchParams])
 
   async function loadConnections() {
     try {
@@ -84,11 +94,15 @@ export default function ConexaoMeta() {
     setError('')
     setConnecting(provider)
     try {
-      const res = await api.get<{ auth_url: string }>('/auth/meta/start', {
-        params: { account_id: tid, provider },
-      })
+      const endpoint = provider === 'instagram'
+        ? '/auth/instagram/start'
+        : '/auth/meta/start'
+      const params: Record<string, string> = provider === 'instagram'
+        ? { account_id: tid }
+        : { account_id: tid, provider }
+      const res = await api.get<{ auth_url: string }>(endpoint, { params })
       if (res.data.auth_url) {
-        window.location.href = res.data.auth_url
+        window.open(res.data.auth_url, '_blank')
       } else {
         setError('Erro ao obter URL de autenticação.')
       }
@@ -123,9 +137,9 @@ export default function ConexaoMeta() {
   if (!accountId) {
     return (
       <div>
-        <h2 className="text-2xl font-bold text-dark-600 mb-6">Conexão Meta</h2>
-        <div className="bg-surface-card rounded-xl border border-dark-50 p-8 max-w-lg text-center">
-          <p className="text-dark-400 text-sm">Complete o onboarding para conectar suas contas.</p>
+        <h2 className="text-2xl font-bold text-[#e2e2e8] mb-6">Conexão Meta</h2>
+        <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-8 max-w-lg text-center">
+          <p className="text-[#555] text-sm">Complete o onboarding para conectar suas contas.</p>
         </div>
       </div>
     )
@@ -135,9 +149,9 @@ export default function ConexaoMeta() {
   if (!token) {
     return (
       <div>
-        <h2 className="text-2xl font-bold text-dark-600 mb-6">Conexão Meta</h2>
-        <div className="bg-surface-card rounded-xl border border-dark-50 p-8 max-w-lg text-center">
-          <p className="text-dark-400 text-sm">Faça login primeiro para conectar suas contas.</p>
+        <h2 className="text-2xl font-bold text-[#e2e2e8] mb-6">Conexão Meta</h2>
+        <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-8 max-w-lg text-center">
+          <p className="text-[#555] text-sm">Faça login primeiro para conectar suas contas.</p>
         </div>
       </div>
     )
@@ -145,19 +159,19 @@ export default function ConexaoMeta() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-dark-600 mb-2">Conexão Meta</h2>
-      <p className="text-dark-400 text-sm mb-6">
+      <h2 className="text-2xl font-bold text-[#e2e2e8] mb-2">Conexão Meta</h2>
+      <p className="text-[#555] text-sm mb-6">
         Conecte suas contas do Instagram, WhatsApp e Meta Ads para automatizar a gestão.
       </p>
 
       {error && (
-        <div className="mb-4 bg-red-900/20 border border-red-900/40 text-red-400 text-sm rounded-lg px-4 py-3">
+        <div className="mb-4 bg-red-900/20 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="text-dark-400 text-sm">Carregando conexões...</div>
+        <div className="text-[#555] text-sm">Carregando conexões...</div>
       ) : (
         <div className="grid gap-4 max-w-2xl">
           {PROVIDERS.map(({ key, label, icon, description }) => {
@@ -168,24 +182,24 @@ export default function ConexaoMeta() {
             return (
               <div
                 key={key}
-                className="bg-surface-card rounded-xl border border-dark-50 p-6 flex items-center gap-4"
+                className="bg-[#111118] rounded-xl border border-white/[0.06] p-6 flex items-center gap-4"
               >
-                <div className="w-12 h-12 rounded-full bg-brand-900/40 flex items-center justify-center text-2xl flex-shrink-0">
+                <div className="w-12 h-12 rounded-full bg-indigo-500/10 flex items-center justify-center text-2xl flex-shrink-0">
                   {icon}
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-dark-600 font-semibold text-sm">{label}</h3>
+                    <h3 className="text-[#e2e2e8] font-semibold text-sm">{label}</h3>
                     {conn && (
                       <span className={`text-xs font-medium ${STATUS_COLOR[conn.status]}`}>
                         • {STATUS_LABEL[conn.status]}
                       </span>
                     )}
                   </div>
-                  <p className="text-dark-400 text-xs mt-0.5">{description}</p>
+                  <p className="text-[#555] text-xs mt-0.5">{description}</p>
                   {conn?.expires_at && (
-                    <p className="text-dark-300 text-xs mt-1">
+                    <p className="text-[#444] text-xs mt-1">
                       Expira em: {new Date(conn.expires_at).toLocaleDateString('pt-BR')}
                     </p>
                   )}
@@ -204,7 +218,7 @@ export default function ConexaoMeta() {
                     <button
                       onClick={() => handleConnect(key)}
                       disabled={connecting === key}
-                      className="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-600/50 text-white rounded-lg text-xs font-semibold transition-colors"
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white rounded-lg text-xs font-semibold transition-colors"
                     >
                       {connecting === key
                         ? 'Redirecionando...'

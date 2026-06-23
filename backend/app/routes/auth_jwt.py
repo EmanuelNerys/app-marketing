@@ -1,5 +1,6 @@
 import uuid
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -14,6 +15,8 @@ from app.core.security import (
 )
 from app.models.account import Account
 from app.models.user import User
+from app.models.subscription import Subscription, SubscriptionPlan, SubscriptionStatus
+from app.services.email_service import send_verification_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth-jwt"])
@@ -79,6 +82,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     await db.flush()  # gera tenant.id sem commitar
 
     # Cria o usuário admin do tenant
+    verification_token = str(uuid.uuid4()) + str(uuid.uuid4()).replace("-", "")
     user = User(
         id=str(uuid.uuid4()),
         tenant_id=tenant.id,
@@ -86,9 +90,27 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
         password_hash=hash_password(body.password),
         full_name=body.full_name,
         role="admin",
+        is_verified=False,
+        verification_token=verification_token,
     )
     db.add(user)
     await db.flush()
+
+    # Cria subscription gratuita confirmada para o tenant
+    sub = Subscription(
+        account_id=tenant.id,
+        plan=SubscriptionPlan.FREE,
+        value=0.0,
+        status=SubscriptionStatus.CONFIRMED,
+        is_active=True,
+        auto_renew=True,
+        confirmed_at=datetime.now(timezone.utc),
+    )
+    db.add(sub)
+    await db.flush()
+
+    # Envia email de verificação (não bloqueante)
+    await send_verification_email(body.username, verification_token, body.full_name or body.username)
 
     logger.info("Novo tenant registrado: %s | user: %s", tenant.id, user.username)
 

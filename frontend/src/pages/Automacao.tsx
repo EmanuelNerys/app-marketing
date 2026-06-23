@@ -37,38 +37,38 @@ export default function Automacao() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-dark-600 mb-6">Automação</h2>
-      <div className="bg-surface-card rounded-xl border border-dark-50 p-8 max-w-lg">
+      <h2 className="text-2xl font-bold text-[#e2e2e8] mb-6">Automação</h2>
+      <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-8 max-w-lg">
         {feedback && (
-          <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${feedback.type === 'success' ? 'bg-green-900/20 border border-green-900/40 text-green-400' : 'bg-red-900/20 border border-red-900/40 text-red-400'}`}>
+          <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${feedback.type === 'success' ? 'bg-green-900/20 border border-green-500/20 text-green-400' : 'bg-red-900/20 border border-red-500/20 text-red-400'}`}>
             {feedback.message}
           </div>
         )}
         <form onSubmit={handleSave} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-dark-500 mb-1">Palavra-chave</label>
+            <label className="block text-sm font-medium text-[#666] mb-1">Palavra-chave</label>
             <input
               type="text"
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               placeholder="Ex: QUERO"
-              className="w-full px-4 py-2 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none placeholder-dark-300"
+              className="w-full px-4 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none placeholder-[#333]"
             />
-            <p className="text-xs text-dark-300 mt-1">Comentários no Instagram com esta palavra ativarão a resposta automática.</p>
+            <p className="text-xs text-[#444] mt-1">Comentários no Instagram com esta palavra ativarão a resposta automática.</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-dark-500 mb-1">Mensagem de Resposta Automática</label>
+            <label className="block text-sm font-medium text-[#666] mb-1">Mensagem de Resposta Automática</label>
             <textarea
               value={autoReplyMessage}
               onChange={(e) => setAutoReplyMessage(e.target.value)}
               rows={4}
-              className="w-full px-4 py-2 bg-dark border border-dark-50 text-dark-600 rounded-lg focus:ring-2 focus:ring-brand-500 focus:outline-none resize-none placeholder-dark-300"
+              className="w-full px-4 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none resize-none placeholder-[#333]"
             />
           </div>
           <button
             type="submit"
             disabled={saving}
-            className="w-full py-3 px-6 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-600/50 text-white font-semibold rounded-xl transition-colors shadow-md"
+            className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-semibold rounded-xl transition-colors"
           >
             {saving ? 'Salvando...' : 'Salvar Configuração'}
           </button>

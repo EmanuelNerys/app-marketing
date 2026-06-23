@@ -46,6 +46,21 @@ async def verify_webhook(request: Request):
     raise HTTPException(status_code=400, detail="Requisição de verificação inválida.")
 
 
+@router.get("/instagram")
+async def verify_instagram_webhook(request: Request):
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+
+    if mode and token:
+        if mode == "subscribe" and token == settings.meta_webhook_verify_token:
+            logger.info("Instagram webhook verified.")
+            return int(challenge)
+        raise HTTPException(status_code=403, detail="Token de verificação inválido.")
+
+    raise HTTPException(status_code=400, detail="Requisição de verificação inválida.")
+
+
 # ---------------------------------------------------------------------------
 # Event receiver (POST)
 # ---------------------------------------------------------------------------

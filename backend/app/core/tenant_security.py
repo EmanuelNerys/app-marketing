@@ -36,20 +36,32 @@ class TenantValidator:
         resource_name: str = "recurso"
     ) -> None:
         """
-        Valida se a account atual é proprietária do recurso.
+        Valida se a account atual é proprietária do recurso
+        OU se é a agência parent (sub-tenant).
         
         Lança TenantSecurityError se não for.
         """
         if resource_account_id != current_account.id:
-            logger.warning(
-                f"SECURITY: Tentativa de acesso não autorizado. "
-                f"Account={current_account.id}, "
-                f"Recurso={resource_account_id}, "
-                f"Tipo={resource_name}"
-            )
-            raise TenantSecurityError(
-                detail=f"Acesso negado ao {resource_name}"
-            )
+            # Check if current account is the parent (agency) of the resource
+            from sqlalchemy import select
+            from app.core.database import async_session
+            async with async_session() as session:
+                result = await session.execute(
+                    select(Account).where(
+                        Account.id == resource_account_id,
+                        Account.parent_account_id == current_account.id
+                    )
+                )
+                if not result.scalar_one_or_none():
+                    logger.warning(
+                        f"SECURITY: Tentativa de acesso não autorizado. "
+                        f"Account={current_account.id}, "
+                        f"Recurso={resource_account_id}, "
+                        f"Tipo={resource_name}"
+                    )
+                    raise TenantSecurityError(
+                        detail=f"Acesso negado ao {resource_name}"
+                    )
     
     @staticmethod
     async def validate_subscription_ownership(

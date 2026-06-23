@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Text, DateTime, Boolean, Integer
+from sqlalchemy import String, Text, DateTime, Boolean, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -14,6 +14,12 @@ class Account(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     brand_name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Hierarquia: se preenchido, esta conta é sub-tenant de outra
+    parent_account_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     meta_page_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     meta_page_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     meta_access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
