@@ -9,10 +9,30 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.automation import AutomationConfig
-from app.schemas import AutomationConfigResponse, AutomationConfigUpdate
+from app.schemas.automation import (
+    AutomationConfigCreate,
+    AutomationConfigResponse,
+    AutomationConfigUpdate,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/automations", tags=["automations"])
+
+
+@router.post("", response_model=AutomationConfigResponse, status_code=201)
+async def create_automation(
+    data: AutomationConfigCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    config = AutomationConfig(
+        account_id=current_user.tenant_id,
+        **data.model_dump(),
+    )
+    db.add(config)
+    await db.flush()
+    await db.refresh(config)
+    return config
 
 
 @router.get("", response_model=List[AutomationConfigResponse])

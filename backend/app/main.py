@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.routes import auth, webhook, automation, dashboard, leads, accounts, automations, studio, privacy, instagram, instagram_api
+from app.routes import auth, webhook, dashboard, leads, accounts, automations, studio, privacy, instagram, instagram_api
 from app.routes import auth_jwt, conversations, messages, ws, whatsapp, payments, tenants, clients
 from app.routes import auth_email
 from app.routes import marketing
@@ -55,6 +55,12 @@ _MIGRATIONS = [
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS score_notes TEXT",
     "ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_scored_at TIMESTAMPTZ",
     "CREATE INDEX IF NOT EXISTS ix_leads_score_label ON leads (score_label)",
+    # Comment -> private DM automation (growth flow)
+    "ALTER TABLE automation_configs ADD COLUMN IF NOT EXISTS trigger_type VARCHAR(20) NOT NULL DEFAULT 'both'",
+    "ALTER TABLE automation_configs ADD COLUMN IF NOT EXISTS media_id VARCHAR(100)",
+    "ALTER TABLE automation_configs ADD COLUMN IF NOT EXISTS comment_reply_message TEXT",
+    "ALTER TABLE automation_configs ADD COLUMN IF NOT EXISTS dm_message TEXT",
+    "CREATE INDEX IF NOT EXISTS ix_automation_configs_media_id ON automation_configs (media_id)",
 ]
 
 
@@ -105,7 +111,6 @@ async def health():
 # Meta / legacy onboarding
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(webhook.router, prefix="/api/v1")
-app.include_router(automation.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
 app.include_router(leads.router, prefix="/api/v1")
 app.include_router(accounts.router, prefix="/api/v1")

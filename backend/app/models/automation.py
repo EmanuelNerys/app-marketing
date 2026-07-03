@@ -18,6 +18,16 @@ class AutomationConfig(Base):
     )
     keyword: Mapped[str] = mapped_column(String(255), nullable=False)
     auto_reply_message: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # "comment" | "dm" | "both" — which webhook channel this automation reacts to
+    trigger_type: Mapped[str] = mapped_column(String(20), nullable=False, default="both")
+    # Restrict the automation to a single IG post/reel. NULL = applies to all posts.
+    media_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    # Public reply posted under the comment. Falls back to auto_reply_message when unset.
+    comment_reply_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Private DM sent to the commenter (via IG "private reply" API) when set.
+    dm_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

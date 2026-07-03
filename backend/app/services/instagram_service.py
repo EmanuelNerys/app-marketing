@@ -66,12 +66,28 @@ async def send_dm(token: str, recipient_id: str, message: str) -> dict:
 # ---------------------------------------------------------------------------
 
 async def reply_to_comment(token: str, comment_id: str, message: str) -> dict:
-    """Reply to an Instagram comment."""
+    """Reply to an Instagram comment (public, visible under the post)."""
     return await _request(
         "POST",
         f"{settings.ig_graph_url}/{comment_id}/replies",
         params={"access_token": token},
         json={"message": message},
+    )
+
+
+async def send_private_reply(token: str, comment_id: str, message: str) -> dict:
+    """
+    Send a private DM in response to a specific comment ("private reply").
+
+    Meta constraints (not configurable): the reply must be sent within 7 days
+    of the comment, and only one private reply is allowed per comment_id —
+    a second attempt returns an error from the Graph API.
+    """
+    return await _request(
+        "POST",
+        f"{settings.ig_graph_url}/me/messages",
+        params={"access_token": token},
+        json={"recipient": {"comment_id": comment_id}, "message": {"text": message}},
     )
 
 

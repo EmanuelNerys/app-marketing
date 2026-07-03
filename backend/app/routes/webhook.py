@@ -143,6 +143,7 @@ async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
     instagram_handle = from_data.get("username") or from_data.get("id", "unknown")
     comment_id = value.get("id", "")
     comment_text = value.get("text", "")
+    media_id = value.get("media", {}).get("id")
 
     # Salva o lead (cada comentário pode gerar um novo lead ou reusar existente)
     existing = await _find_lead(account.id, instagram_handle, db)
@@ -157,17 +158,28 @@ async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
         db.add(lead)
         logger.info("Novo lead (comentário): %s | conta %s", instagram_handle, account.id)
 
-    # Verifica automações ativas para esse tenant
+    # Verifica automações ativas para esse tenant (escopo: comentário, opcionalmente por post)
     if comment_text:
-        matched = await _match_automation(account.id, comment_text, db)
+        matched = await _match_automation(account.id, comment_text, db, channel="comment", media_id=media_id)
         if matched:
             token = await _get_token(account, db)
             if token and comment_id:
-                try:
-                    await instagram_service.reply_to_comment(token, comment_id, matched.auto_reply_message)
-                    logger.info("Auto-reply enviado no comentário %s", comment_id)
-                except Exception as exc:
-                    logger.warning("Falha no auto-reply de comentário: %s", exc)
+                # Resposta pública no comentário (mantém o comportamento legado como fallback)
+                reply_text = matched.comment_reply_message or matched.auto_reply_message
+                if reply_text:
+                    try:
+                        await instagram_service.reply_to_comment(token, comment_id, reply_text)
+                        logger.info("Auto-reply enviado no comentário %s", comment_id)
+                    except Exception as exc:
+                        logger.warning("Falha no auto-reply de comentário: %s", exc)
+
+                # DM privada disparada pelo comentário ("comenta X e recebe no direto")
+                if matched.dm_message:
+                    try:
+                        await instagram_service.send_private_reply(token, comment_id, matched.dm_message)
+                        logger.info("DM privada enviada para comentário %s", comment_id)
+                    except Exception as exc:
+                        logger.warning("Falha ao enviar DM privada do comentário %s: %s", comment_id, exc)
 
     await dispatch_event("ig_comment", account.id, value)
 
@@ -213,7 +225,7 @@ async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
 
     # Verifica automações e responde
     if message_text:
-        matched = await _match_automation(account.id, message_text, db)
+        matched = await _match_automation(account.id, message_text, db, channel="dm")
         if matched:
             token = await _get_token(account, db)
             if token:
@@ -526,8 +538,20 @@ async def _find_lead(account_id: str, instagram_handle: str, db: AsyncSession) -
     return result.scalar_one_or_none()
 
 
-async def _match_automation(account_id: str, text: str, db: AsyncSession) -> AutomationConfig | None:
-    """Retorna a primeira AutomationConfig ativa cuja keyword aparece no texto."""
+async def _match_automation(
+    account_id: str,
+    text: str,
+    db: AsyncSession,
+    channel: str = "dm",
+    media_id: str | None = None,
+) -> AutomationConfig | None:
+    """
+    Retorna a primeira AutomationConfig ativa cuja keyword aparece no texto.
+
+    channel: "comment" (comentário IG), "dm" (DM IG ou mensagem WhatsApp).
+    Uma automação com trigger_type="both" reage nos dois canais; media_id
+    restringe o disparo a comentários de um post específico quando definido.
+    """
     result = await db.execute(
         select(AutomationConfig).where(
             AutomationConfig.account_id == account_id,
@@ -535,6 +559,10 @@ async def _match_automation(account_id: str, text: str, db: AsyncSession) -> Aut
         )
     )
     for config in result.scalars().all():
+        if config.trigger_type not in ("both", channel):
+            continue
+        if config.media_id and config.media_id != media_id:
+            continue
         if config.keyword.lower() in text.lower():
             return config
     return None

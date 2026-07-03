@@ -66,24 +66,6 @@ class SelectPlanRequest(BaseModel):
     plan_type: str
 
 
-class AutomationConfigResponse(BaseModel):
-    id: str
-    account_id: str
-    keyword: str
-    auto_reply_message: str
-    is_active: bool
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class AutomationConfigUpdate(BaseModel):
-    keyword: Optional[str] = None
-    auto_reply_message: Optional[str] = None
-    is_active: Optional[bool] = None
-
-
 class CustomerResponse(BaseModel):
     id: str
     account_id: str

@@ -232,6 +232,98 @@ async def test_keyword_triggers_auto_reply(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_comment_keyword_sends_private_dm(client, db_session):
+    account = Account(
+        brand_name="DM Test",
+        meta_page_id="PAGE_005",
+        meta_page_name="Página DM",
+        meta_access_token="fake_token",
+    )
+    db_session.add(account)
+    await db_session.flush()
+    await db_session.refresh(account)
+
+    config = AutomationConfig(
+        account_id=account.id,
+        keyword="quero",
+        auto_reply_message="Fallback",
+        comment_reply_message="Te chamei no direto!",
+        dm_message="Aqui está o link que você pediu 😉",
+        trigger_type="both",
+        is_active=True,
+    )
+    db_session.add(config)
+    await db_session.flush()
+
+    payload = {
+        "object": "instagram",
+        "entry": [{
+            "id": "PAGE_005",
+            "changes": [{
+                "field": "comments",
+                "value": {"from": {"id": "U5", "username": "carla"}, "id": "C5", "text": "Quero saber mais!"},
+            }],
+        }],
+    }
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock) as mock_reply, \
+         patch("app.services.instagram_service.send_private_reply", new_callable=AsyncMock) as mock_dm:
+        await _signed_post(client, payload)
+        mock_reply.assert_called_once()
+        assert mock_reply.call_args[0][2] == "Te chamei no direto!"
+        mock_dm.assert_called_once()
+        assert mock_dm.call_args[0][1] == "C5"
+        assert mock_dm.call_args[0][2] == "Aqui está o link que você pediu 😉"
+
+
+@pytest.mark.asyncio
+async def test_automation_scoped_to_other_media_does_not_match(client, db_session):
+    account = Account(
+        brand_name="Media Scope Test",
+        meta_page_id="PAGE_006",
+        meta_page_name="Página Scope",
+        meta_access_token="fake_token",
+    )
+    db_session.add(account)
+    await db_session.flush()
+    await db_session.refresh(account)
+
+    config = AutomationConfig(
+        account_id=account.id,
+        keyword="quero",
+        auto_reply_message="Fallback",
+        dm_message="Só deveria disparar no post MEDIA_A",
+        media_id="MEDIA_A",
+        trigger_type="both",
+        is_active=True,
+    )
+    db_session.add(config)
+    await db_session.flush()
+
+    payload = {
+        "object": "instagram",
+        "entry": [{
+            "id": "PAGE_006",
+            "changes": [{
+                "field": "comments",
+                "value": {
+                    "from": {"id": "U6", "username": "bruno"},
+                    "id": "C6",
+                    "text": "Quero saber mais!",
+                    "media": {"id": "MEDIA_B"},
+                },
+            }],
+        }],
+    }
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock) as mock_reply, \
+         patch("app.services.instagram_service.send_private_reply", new_callable=AsyncMock) as mock_dm:
+        await _signed_post(client, payload)
+        mock_reply.assert_not_called()
+        mock_dm.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_no_match_no_reply(client, db_session):
     account = Account(
         brand_name="NoMatch Test",

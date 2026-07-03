@@ -252,6 +252,25 @@ Cada tenant recebe apenas seus próprios eventos. Keepalive: envie `ping` → re
 
 ---
 
+### Automações (comentário → DM / WhatsApp)
+
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/v1/automations` | Cria automação (keyword, canal, post opcional, mensagens) |
+| GET | `/api/v1/automations` | Lista automações do tenant |
+| GET | `/api/v1/automations/{id}` | Detalhe |
+| PUT | `/api/v1/automations/{id}` | Atualiza (parcial) |
+| DELETE | `/api/v1/automations/{id}` | Remove |
+
+Cada `AutomationConfig` reage a uma `keyword` em um ou dois canais (`trigger_type`: `comment` · `dm` · `both`), opcionalmente restrita a um post/reel específico (`media_id`). Quando um comentário do Instagram bate com a keyword:
+
+1. Responde publicamente no comentário com `comment_reply_message` (ou `auto_reply_message` como fallback), via `POST /{comment_id}/replies`.
+2. Se `dm_message` estiver preenchido, envia uma DM privada para quem comentou via `POST /me/messages` com `recipient.comment_id` ("private reply") — sem precisar de conversa prévia.
+
+Restrições da Meta (não configuráveis): a DM privada só pode ser enviada até 7 dias após o comentário, e apenas uma vez por comentário.
+
+---
+
 ### Meta OAuth (Instagram / Ads)
 
 | Método | Rota | Descrição |

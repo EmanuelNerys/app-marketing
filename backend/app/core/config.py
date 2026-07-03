@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # Optional: n8n webhook URL for event dispatching
     n8n_webhook_url: str = ""
 
+    # ngrok (local tunnel for testing Meta webhooks)
+    ngrok_authtoken: str = ""
+    ngrok_domain: str = ""
+
     secret_key: str = "change_this_to_a_random_secret_key"
     jwt_algorithm: str = "HS256"
     jwt_access_expire_minutes: int = 60
