@@ -34,6 +34,8 @@ class ConversationOut(BaseModel):
     atendimento_status: str
     status: str
     unread_count: int
+    bot_active: bool = True
+    customer_name: str | None = None
     last_updated: datetime
     created_at: datetime
 
@@ -52,6 +54,7 @@ class UpdateConversationRequest(BaseModel):
     status: str | None = None
     atendente_id: str | None = None
     unread_count: int | None = None
+    bot_active: bool | None = None
 
 
 class StartConversationRequest(BaseModel):
@@ -193,7 +196,24 @@ async def list_conversations(
     q = q.order_by(desc(Conversation.last_updated)).limit(limit).offset(offset)
 
     result = await db.execute(q)
-    return result.scalars().all()
+    convs = result.scalars().all()
+
+    # Enriquece com o nome do cliente (lead)
+    lead_ids = [c.customer_id for c in convs if c.customer_id]
+    names: dict[str, str] = {}
+    if lead_ids:
+        lead_res = await db.execute(
+            select(Lead.id, Lead.name, Lead.instagram_handle).where(Lead.id.in_(lead_ids))
+        )
+        for lid, lname, handle in lead_res.all():
+            names[lid] = lname or handle
+
+    out = []
+    for c in convs:
+        item = ConversationOut.model_validate(c)
+        item.customer_name = names.get(c.customer_id) if c.customer_id else None
+        out.append(item)
+    return out
 
 
 @router.post("", response_model=ConversationOut, status_code=201)
@@ -248,6 +268,8 @@ async def update_conversation(
         conv.atendente_id = body.atendente_id
     if body.unread_count is not None:
         conv.unread_count = body.unread_count
+    if body.bot_active is not None:
+        conv.bot_active = body.bot_active
 
     conv.last_updated = datetime.now(timezone.utc)
     await db.flush()

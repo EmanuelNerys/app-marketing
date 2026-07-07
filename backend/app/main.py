@@ -61,6 +61,9 @@ _MIGRATIONS = [
     "ALTER TABLE automation_configs ADD COLUMN IF NOT EXISTS comment_reply_message TEXT",
     "ALTER TABLE automation_configs ADD COLUMN IF NOT EXISTS dm_message TEXT",
     "CREATE INDEX IF NOT EXISTS ix_automation_configs_media_id ON automation_configs (media_id)",
+
+    # Conversas: bot ligado/desligado por conversa (filas bot/espera/minhas)
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_active BOOLEAN NOT NULL DEFAULT TRUE",
 ]
 
 

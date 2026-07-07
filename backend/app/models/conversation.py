@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Integer, DateTime, ForeignKey, Index
+from sqlalchemy import String, Integer, DateTime, ForeignKey, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -27,6 +27,8 @@ class Conversation(Base):
     # "active" | "closed"
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Bot handling this conversation (fila "bot"). Desligar entrega ao humano (fila "espera").
+    bot_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_updated: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Clapperboard, Megaphone, Link2, Send,
   Zap, Users, Settings, CreditCard, Building2, LogOut,
-  ChevronRight,
+  ChevronRight, MessageSquare,
   type LucideIcon,
 } from 'lucide-react'
 import api from '../services/api'
@@ -16,6 +16,7 @@ const baseLinks: NavItem[] = [
   { to: '/app/studio', label: 'Studio de Criação', icon: Clapperboard },
   { to: '/app/marketing', label: 'Marketing', icon: Megaphone },
   { to: '/app/conexao', label: 'Conexão Meta', icon: Link2 },
+  { to: '/app/whatsapp', label: 'WhatsApp', icon: MessageSquare },
   { to: '/app/publicar', label: 'Publicar', icon: Send },
   { to: '/app/automacao', label: 'Automação', icon: Zap },
   { to: '/app/leads', label: 'Leads', icon: Users },
