@@ -4,10 +4,13 @@ import {
   LayoutDashboard, Clapperboard, Megaphone, Link2, Send,
   Zap, Users, Settings, CreditCard, Building2, LogOut,
   ChevronRight,
+  type LucideIcon,
 } from 'lucide-react'
 import api from '../services/api'
 
-const baseLinks = [
+type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean }
+
+const baseLinks: NavItem[] = [
   { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/app/studio', label: 'Studio de Criação', icon: Clapperboard },
   { to: '/app/marketing', label: 'Marketing', icon: Megaphone },
@@ -17,12 +20,12 @@ const baseLinks = [
   { to: '/app/leads', label: 'Leads', icon: Users },
 ]
 
-const bottomLinks = [
+const bottomLinks: NavItem[] = [
   { to: '/app/configuracoes', label: 'Configurações', icon: Settings },
   { to: '/pricing', label: 'Planos', icon: CreditCard },
 ]
 
-const agencyLink = { to: '/app/clientes', label: 'Clientes', icon: Building2 }
+const agencyLink: NavItem = { to: '/app/clientes', label: 'Clientes', icon: Building2 }
 
 const planosAgencia = ['pro', 'premium']
 
