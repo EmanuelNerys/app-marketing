@@ -7,6 +7,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import api from '../services/api'
+import AccountSwitcher from './AccountSwitcher'
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean }
 
@@ -25,38 +26,21 @@ const bottomLinks: NavItem[] = [
   { to: '/pricing', label: 'Planos', icon: CreditCard },
 ]
 
-const agencyLink: NavItem = { to: '/app/clientes', label: 'Clientes', icon: Building2 }
-
-const planosAgencia = ['pro', 'premium']
-
 export default function Sidebar() {
   const navigate = useNavigate()
-  const [plan, setPlan] = useState<string | null>(null)
-  const [impersonating, setImpersonating] = useState<string | null>(null)
+  const [planType, setPlanType] = useState<string | null>(null)
 
   useEffect(() => {
-    api.get('/payments/current').then(({ data }) => {
-      if (data?.plan) setPlan(data.plan)
+    api.get('/auth/me').then(({ data }) => {
+      if (data?.plan_type) setPlanType(data.plan_type)
     }).catch(() => {})
-
-    const imp = localStorage.getItem('impersonating_name')
-    if (localStorage.getItem('impersonating') === 'true' && imp) {
-      setImpersonating(imp)
-    }
   }, [])
 
-  const mainLinks = plan && planosAgencia.includes(plan)
-    ? [...baseLinks, agencyLink]
-    : baseLinks
+  const mainLinks = baseLinks
+  const isAgency = planType === 'agencia'
 
   function handleLogout() {
     localStorage.clear()
-    navigate('/login')
-  }
-
-  function handleExitImpersonation() {
-    localStorage.removeItem('impersonating')
-    localStorage.removeItem('impersonating_name')
     navigate('/login')
   }
 
@@ -77,19 +61,8 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Impersonation banner */}
-      {impersonating && (
-        <div className="mx-3 mb-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-          <p className="text-[10px] text-amber-400 font-medium leading-tight">Acessando como</p>
-          <p className="text-xs text-amber-300 font-semibold truncate">{impersonating}</p>
-          <button
-            onClick={handleExitImpersonation}
-            className="text-[10px] text-amber-500 hover:text-amber-400 mt-1 underline"
-          >
-            Sair desta conta
-          </button>
-        </div>
-      )}
+      {/* Account switcher (agência ↔ clientes) */}
+      <AccountSwitcher />
 
       {/* Main nav */}
       <nav className="flex-1 px-3 py-2 flex flex-col gap-0.5">
@@ -117,7 +90,7 @@ export default function Sidebar() {
           )
         })}
 
-        {plan && planosAgencia.includes(plan) && (
+        {isAgency && (
           <>
             <div className="h-px bg-white/[0.05] my-3 mx-2" />
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[#3a3a4a] px-2 mb-2">

@@ -58,6 +58,8 @@ class UserOut(BaseModel):
     full_name: str | None
     role: str
     is_active: bool
+    plan_type: str | None = None
+    brand_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +182,12 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/me", response_model=UserOut)
-async def me(current_user: User = Depends(get_current_user)):
+async def me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Account).where(Account.id == current_user.tenant_id))
+    account = result.scalar_one_or_none()
     return UserOut(
         id=current_user.id,
         tenant_id=current_user.tenant_id,
@@ -188,6 +195,8 @@ async def me(current_user: User = Depends(get_current_user)):
         full_name=current_user.full_name,
         role=current_user.role,
         is_active=current_user.is_active,
+        plan_type=account.plan_type if account else None,
+        brand_name=account.brand_name if account else None,
     )
 
 

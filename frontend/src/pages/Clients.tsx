@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   Building2, Plus, ExternalLink, Trash2, Users, TrendingUp,
   CheckCircle, Wifi, WifiOff, X, Eye, EyeOff,
@@ -68,7 +67,6 @@ function MetricCard({ icon: Icon, iconColor, value, label, sub }: {
 }
 
 export default function Clients() {
-  const navigate = useNavigate()
   const [clients, setClients] = useState<Client[]>([])
   const [agencyStats, setAgencyStats] = useState<AgencyDashboard | null>(null)
   const [loading, setLoading] = useState(true)
@@ -132,6 +130,12 @@ export default function Clients() {
 
   async function handleImpersonate(clientId: string) {
     try {
+      // Preserve the agency session so the account switcher can return to it.
+      localStorage.setItem('agency_access_token', localStorage.getItem('access_token') || '')
+      localStorage.setItem('agency_refresh_token', localStorage.getItem('refresh_token') || '')
+      localStorage.setItem('agency_tenant_id', localStorage.getItem('tenant_id') || '')
+      localStorage.setItem('agency_user_id', localStorage.getItem('user_id') || '')
+
       const { data } = await api.post(`/auth/clients/${clientId}/impersonate`)
       localStorage.setItem('access_token', data.access_token)
       localStorage.setItem('refresh_token', data.refresh_token)
@@ -139,7 +143,8 @@ export default function Clients() {
       localStorage.setItem('tenant_id', data.tenant_id)
       localStorage.setItem('impersonating', 'true')
       localStorage.setItem('impersonating_name', data.client_brand_name)
-      navigate('/app')
+      // Full reload so every screen refetches with the client's tenant.
+      window.location.href = '/app'
     } catch {
       alert('Erro ao acessar conta do cliente.')
     }

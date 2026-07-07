@@ -359,10 +359,10 @@ async def delete_connection(
 
 @router.get("/onboarding/status", response_model=OnboardingStatusResponse)
 async def onboarding_status(
-    account_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Account).where(Account.id == account_id))
+    result = await db.execute(select(Account).where(Account.id == current_user.tenant_id))
     account = result.scalar_one_or_none()
     if not account:
         raise HTTPException(status_code=404, detail="Conta não encontrada")
@@ -381,26 +381,16 @@ async def onboarding_status(
 @router.post("/onboarding/plan")
 async def select_plan(
     data: SelectPlanRequest,
-    account_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Account).where(Account.id == account_id))
-    account = result.scalar_one_or_none()
-
-    if not account:
-        account = Account(
-            id=account_id,
-            brand_name=data.plan_type,
-            plan_type=data.plan_type,
-            onboarding_step=1,
-        )
-        db.add(account)
-        await db.flush()
-        await db.refresh(account)
-        return {"success": True, "plan_type": account.plan_type, "onboarding_step": account.onboarding_step, "account_id": account.id}
-
     if data.plan_type not in ("autonomo", "agencia"):
         raise HTTPException(status_code=400, detail="Plano inválido. Escolha 'autonomo' ou 'agencia'.")
+
+    result = await db.execute(select(Account).where(Account.id == current_user.tenant_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
 
     account.plan_type = data.plan_type
     if account.onboarding_step < 1:
@@ -414,11 +404,11 @@ async def select_plan(
 
 @router.post("/onboarding/complete-step")
 async def complete_step(
-    account_id: str = Query(...),
     step: int = Query(...),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Account).where(Account.id == account_id))
+    result = await db.execute(select(Account).where(Account.id == current_user.tenant_id))
     account = result.scalar_one_or_none()
     if not account:
         raise HTTPException(status_code=404, detail="Conta não encontrada")
@@ -433,10 +423,10 @@ async def complete_step(
 
 @router.get("/meta/ad-accounts")
 async def list_ad_accounts(
-    account_id: str = Query(...),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Account).where(Account.id == account_id))
+    result = await db.execute(select(Account).where(Account.id == current_user.tenant_id))
     account = result.scalar_one_or_none()
     if not account:
         raise HTTPException(status_code=404, detail="Conta não encontrada")

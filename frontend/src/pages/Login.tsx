@@ -65,8 +65,9 @@ export default function Login() {
     setSignupLoading(true)
     try {
       const { data } = await api.post('/auth/register', {
-        name: signupName.trim(),
-        email: signupEmail.trim(),
+        brand_name: signupName.trim(),
+        username: signupEmail.trim(),
+        full_name: signupName.trim(),
         password: signupPassword,
       })
       localStorage.setItem('access_token', data.access_token)

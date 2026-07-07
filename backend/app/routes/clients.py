@@ -58,22 +58,21 @@ async def _require_agency_plan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Ensure the user's tenant has a Pro or Premium plan (agency feature)."""
-    plan = await _get_current_subscription_plan(current_user.tenant_id, db)
+    """Ensure the user's tenant is an agency account (plan_type == 'agencia').
 
-    if plan in (SubscriptionPlan.PRO, SubscriptionPlan.PREMIUM):
-        return plan
-
+    Gated purely by account type, decoupled from the billing plan. Limits per
+    plan (nº de clientes etc.) will be enforced later, in the pricing phase.
+    """
     account_result = await db.execute(
         select(Account).where(Account.id == current_user.tenant_id)
     )
     account = account_result.scalar_one_or_none()
     if account and account.plan_type == "agencia":
-        return plan or SubscriptionPlan.FREE
+        return account.plan_type
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Apenas contas nos planos Profissional ou Premium podem gerenciar clientes.",
+        detail="Apenas contas do tipo Agência podem gerenciar clientes.",
     )
 
 
@@ -91,11 +90,14 @@ async def create_client(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username já em uso.")
 
-    # Create sub-account linked to the agency
+    # Create sub-account linked to the agency.
+    # A managed company runs a single business, so it is always "autonomo"
+    # (no Clients page, cannot create its own sub-accounts).
     client_account = Account(
         id=str(uuid.uuid4()),
         brand_name=body.brand_name,
         parent_account_id=current_user.tenant_id,
+        plan_type="autonomo",
         is_active=True,
     )
     db.add(client_account)
