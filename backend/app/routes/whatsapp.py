@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -23,6 +23,7 @@ from app.models.user import User
 from app.models.meta_connection import MetaConnection, PROVIDER_WHATSAPP, STATUS_ACTIVE
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.lead import Lead
 from app.services import whatsapp_service
 from app.services.meta_token_service import encrypt_token, decrypt_token
 
@@ -64,6 +65,13 @@ class SendTemplateRequest(BaseModel):
     variables: list[str] = Field(default_factory=list,
                                   description="Valores para {{1}}, {{2}}, etc.")
     conversation_id: str | None = None
+
+
+class BroadcastRequest(BaseModel):
+    template_name: str
+    language: str = "pt_BR"
+    variables: list[str] = Field(default_factory=list,
+                                 description="Valores fixos para {{1}}, {{2}}... aplicados a todos")
 
 
 class CreateTemplateRequest(BaseModel):
@@ -305,6 +313,147 @@ async def monthly_stats(
         "service": conn.conv_count_service or 0,
         "authentication": conn.conv_count_auth or 0,
     }
+
+
+# Preço estimado por conversa (BRL), por categoria da Meta.
+# Ponto único de configuração — ajuste aqui quando a Meta mudar os valores.
+WPP_PRICING: dict[str, float] = {
+    "marketing": 0.33,
+    "utility": 0.12,
+    "authentication": 0.15,
+    "service": 0.0,  # conversas iniciadas pelo cliente — sem custo
+}
+
+
+@router.get("/costs")
+async def monthly_costs(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Custo estimado do mês por categoria (contagem × preço) + total."""
+    conn = await _get_conn_or_404(current_user.tenant_id, db)
+    counts = {
+        "marketing": conn.conv_count_marketing or 0,
+        "utility": conn.conv_count_utility or 0,
+        "service": conn.conv_count_service or 0,
+        "authentication": conn.conv_count_auth or 0,
+    }
+    breakdown: dict[str, dict] = {}
+    total = 0.0
+    for cat, count in counts.items():
+        unit = WPP_PRICING.get(cat, 0.0)
+        subtotal = round(count * unit, 2)
+        total += subtotal
+        breakdown[cat] = {"count": count, "unit_cost": unit, "subtotal": subtotal}
+
+    return {
+        "currency": "BRL",
+        "pricing": WPP_PRICING,
+        "breakdown": breakdown,
+        "total": round(total, 2),
+    }
+
+
+async def _get_or_create_conv_for_lead(tenant_id: str, lead_id: str, db: AsyncSession) -> Conversation:
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.tenant_id == tenant_id,
+            Conversation.customer_id == lead_id,
+            Conversation.status == "active",
+        ).limit(1)
+    )
+    conv = result.scalar_one_or_none()
+    if conv:
+        return conv
+    conv = Conversation(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
+        customer_id=lead_id,
+        atendimento_status="aberto",
+        status="active",
+    )
+    db.add(conv)
+    await db.flush()
+    await db.refresh(conv)
+    return conv
+
+
+@router.get("/broadcast/audience")
+async def broadcast_audience(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Quantos leads têm número de telefone (público do disparo em massa)."""
+    result = await db.execute(
+        select(func.count(Lead.id)).where(
+            Lead.account_id == current_user.tenant_id, Lead.phone.isnot(None)
+        )
+    )
+    return {"count": result.scalar() or 0}
+
+
+@router.post("/broadcast")
+async def broadcast_template(
+    body: BroadcastRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Dispara um template para todos os leads que têm número de telefone."""
+    if current_user.role != "admin":
+        raise HTTPException(403, "Apenas admins podem disparar em massa.")
+    conn = await _get_conn_or_404(current_user.tenant_id, db)
+    try:
+        token = decrypt_token(conn.access_token_encrypted)
+    except Exception:
+        raise HTTPException(400, "Não foi possível ler as credenciais do WhatsApp. Reconecte o número.")
+
+    leads = (
+        await db.execute(
+            select(Lead).where(
+                Lead.account_id == current_user.tenant_id, Lead.phone.isnot(None)
+            )
+        )
+    ).scalars().all()
+
+    components = None
+    if body.variables:
+        components = [{
+            "type": "body",
+            "parameters": [{"type": "text", "text": v} for v in body.variables],
+        }]
+
+    sent, failed = 0, 0
+    for lead in leads:
+        to = lead.phone
+        try:
+            resp = await whatsapp_service.send_template(
+                token, conn.phone_number_id, to,
+                body.template_name, body.language, components,
+            )
+            wamid = (resp.get("messages") or [{}])[0].get("id")
+            if not wamid:
+                failed += 1
+                logger.warning("Broadcast sem wamid para %s: %s", to, resp)
+                continue
+            conv = await _get_or_create_conv_for_lead(current_user.tenant_id, lead.id, db)
+            await _save_outbound(
+                tenant_id=current_user.tenant_id,
+                conv_id=conv.id,
+                sender=current_user.username,
+                wa_to=to,
+                text=f"[template:{body.template_name}] {' | '.join(body.variables)}",
+                wamid=wamid,
+                template_name=body.template_name,
+                template_vars={"variables": body.variables},
+                is_within_24h_window=False,
+                db=db,
+            )
+            sent += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("Broadcast falhou para %s: %s", to, exc)
+
+    return {"total": len(leads), "sent": sent, "failed": failed}
 
 
 # ---------------------------------------------------------------------------

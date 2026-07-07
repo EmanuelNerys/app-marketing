@@ -16,6 +16,7 @@ import CompletarCadastro from './pages/CompletarCadastro'
 import Clients from './pages/Clients'
 import Marketing from './pages/Marketing'
 import WhatsApp from './pages/WhatsApp'
+import Templates from './pages/Templates'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import VerifyEmail from './pages/VerifyEmail'
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/app/automacao" element={<Automacao />} />
           <Route path="/app/publicar" element={<PublicarInstagram />} />
           <Route path="/app/whatsapp" element={<WhatsApp />} />
+          <Route path="/app/templates" element={<Templates />} />
           <Route path="/app/leads" element={<Leads />} />
           <Route path="/app/configuracoes" element={<Configuracoes />} />
           <Route path="/app/clientes" element={<Clients />} />

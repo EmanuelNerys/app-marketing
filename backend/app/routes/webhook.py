@@ -327,7 +327,7 @@ async def handle_whatsapp_message(
             except Exception as exc:
                 logger.warning("Failed to download media %s: %s", media_id, exc)
 
-        # Upsert lead (wa_id as instagram_handle for now)
+        # Upsert lead — cria automaticamente com nome + número quando vem do WhatsApp
         lead = await _find_lead(tenant_id, wa_from, db)
         if not lead:
             customer_name = contacts.get(wa_from)
@@ -335,12 +335,16 @@ async def handle_whatsapp_message(
                 id=str(uuid.uuid4()),
                 account_id=tenant_id,
                 instagram_handle=wa_from,
-                name=customer_name,
+                phone=wa_from,
+                name=customer_name or wa_from,
                 source=LeadSource.INSTAGRAM_DM,
                 status=LeadStatus.NEW,
             )
             db.add(lead)
             await db.flush()
+        elif not lead.phone:
+            # Lead já existia (ex: veio do Instagram) — agora temos o número
+            lead.phone = wa_from
 
         # Find or create conversation for this wa_id
         conv = await _get_or_create_wpp_conversation(tenant_id, lead.id, db)

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bot, Clock, UserCheck, Send, Power, MessageSquare, Check, CheckCheck } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Bot, Clock, UserCheck, Send, Power, MessageSquare, Check, CheckCheck, FileText, X } from 'lucide-react'
 import api from '../services/api'
 
 interface Conversation {
@@ -21,7 +22,15 @@ interface Message {
   text: string | null
   direction: string
   status: string
+  wa_id?: string | null
   created_at: string
+}
+
+interface Tpl {
+  name: string
+  language: string
+  status?: string
+  components?: any[]
 }
 
 type Queue = 'bot' | 'espera' | 'minhas'
@@ -55,11 +64,19 @@ export default function WhatsApp() {
   const [sending, setSending] = useState(false)
   const [loadingMsgs, setLoadingMsgs] = useState(false)
 
+  // Envio de template
+  const [showTpl, setShowTpl] = useState(false)
+  const [tpls, setTpls] = useState<Tpl[]>([])
+  const [pickedTpl, setPickedTpl] = useState<Tpl | null>(null)
+  const [tplVars, setTplVars] = useState<string[]>([])
+  const [sendingTpl, setSendingTpl] = useState(false)
+
   const threadRef = useRef<HTMLDivElement>(null)
   const selectedIdRef = useRef<string | null>(null)
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
 
   const selected = convs.find((c) => c.id === selectedId) || null
+  const recipientWaId = messages.find((m) => m.wa_id)?.wa_id || null
 
   function queueOf(c: Conversation): Queue {
     if (c.atendente_id && c.atendente_id === myId) return 'minhas'
@@ -166,15 +183,60 @@ export default function WhatsApp() {
     } catch { /* ignore */ }
   }
 
+  async function openTplPicker() {
+    setShowTpl(true)
+    setPickedTpl(null)
+    try {
+      const { data } = await api.get('/whatsapp/templates')
+      setTpls(Array.isArray(data) ? data : [])
+    } catch { setTpls([]) }
+  }
+
+  function pickTpl(t: Tpl) {
+    setPickedTpl(t)
+    const body = t.components?.find((c) => c.type === 'BODY')?.text || ''
+    const nums = [...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => parseInt(m[1]))
+    setTplVars(Array(nums.length ? Math.max(...nums) : 0).fill(''))
+  }
+
+  async function sendTemplate() {
+    if (!pickedTpl || !selected) return
+    setSendingTpl(true)
+    try {
+      await api.post('/whatsapp/send-template', {
+        to: recipientWaId || '',
+        template_name: pickedTpl.name,
+        language: pickedTpl.language || 'pt_BR',
+        variables: tplVars,
+        conversation_id: selected.id,
+      })
+      setShowTpl(false)
+      setPickedTpl(null)
+      loadMessages(selected.id)
+    } catch {
+      alert('Erro ao enviar template.')
+    } finally {
+      setSendingTpl(false)
+    }
+  }
+
   return (
     <div className="flex gap-4 h-[calc(100vh-4rem)]">
       {/* ---------- Coluna esquerda: filas + lista ---------- */}
       <div className="w-80 shrink-0 flex flex-col bg-[#0d0d13] border border-white/[0.06] rounded-xl overflow-hidden">
-        <div className="px-4 pt-4 pb-3 border-b border-white/[0.06]">
+        <div className="px-4 pt-4 pb-3 border-b border-white/[0.06] flex items-center justify-between">
           <h1 className="text-sm font-semibold text-[#e2e2e8] flex items-center gap-2">
             <MessageSquare size={16} className="text-emerald-400" />
             WhatsApp
           </h1>
+          <Link
+            to="/app/templates"
+            className="flex items-center gap-1.5 text-[11px] text-[#5a5a6e] hover:text-[#c0c0d0] transition-colors no-underline"
+            title="Templates de WhatsApp"
+          >
+            <FileText size={13} />
+            Templates
+          </Link>
         </div>
 
         {/* Filas */}
@@ -325,6 +387,13 @@ export default function WhatsApp() {
             {/* Caixa de resposta */}
             <div className="p-3 border-t border-white/[0.06]">
               <div className="flex items-end gap-2">
+                <button
+                  onClick={openTplPicker}
+                  title="Enviar template (fora da janela de 24h)"
+                  className="w-10 h-10 shrink-0 rounded-xl bg-white/[0.05] border border-white/[0.08] text-[#8a8a9e] hover:text-white flex items-center justify-center transition-colors"
+                >
+                  <FileText size={16} />
+                </button>
                 <textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
@@ -347,6 +416,73 @@ export default function WhatsApp() {
           </>
         )}
       </div>
+
+      {/* Modal: enviar template */}
+      {showTpl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-6 w-full max-w-md max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold text-white">Enviar template</h3>
+              <button onClick={() => setShowTpl(false)} className="text-[#444] hover:text-[#888]"><X size={18} /></button>
+            </div>
+
+            {!recipientWaId && (
+              <div className="bg-amber-900/15 border border-amber-500/20 text-amber-400/90 text-[11px] rounded-lg px-3 py-2 mb-3">
+                Número do cliente não identificado nesta conversa — o envio pode falhar.
+              </div>
+            )}
+
+            {!pickedTpl ? (
+              tpls.length === 0 ? (
+                <p className="text-[#5a5a6e] text-sm text-center py-6">
+                  Nenhum template. Crie na página{' '}
+                  <Link to="/app/templates" className="text-indigo-400">Templates</Link>.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {tpls.map((t) => (
+                    <button
+                      key={t.name}
+                      onClick={() => pickTpl(t)}
+                      className="w-full text-left px-3 py-2.5 rounded-lg bg-[#0a0a0f] border border-white/[0.06] hover:border-indigo-500/40 transition-colors"
+                    >
+                      <p className="text-sm font-medium text-[#e2e2e8]">{t.name}</p>
+                      <p className="text-xs text-[#555] truncate">{t.components?.find((c) => c.type === 'BODY')?.text}</p>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : (
+              <div>
+                <div className="bg-[#0a0a0f] border border-white/[0.06] rounded-lg p-3 mb-3">
+                  <p className="text-sm font-medium text-[#e2e2e8]">{pickedTpl.name}</p>
+                  <p className="text-xs text-[#555] mt-1">{pickedTpl.components?.find((c) => c.type === 'BODY')?.text}</p>
+                </div>
+                {tplVars.length > 0 && (
+                  <div className="space-y-2 mb-3">
+                    {tplVars.map((v, i) => (
+                      <div key={i}>
+                        <label className="block text-[11px] text-[#666] mb-1">Variável {`{{${i + 1}}}`}</label>
+                        <input
+                          value={v}
+                          onChange={(e) => setTplVars((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))}
+                          className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={() => setPickedTpl(null)} className="flex-1 py-2.5 border border-white/[0.08] text-[#666] hover:text-white text-sm rounded-lg transition-colors">Voltar</button>
+                  <button onClick={sendTemplate} disabled={sendingTpl} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+                    {sendingTpl ? 'Enviando…' : 'Enviar'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
