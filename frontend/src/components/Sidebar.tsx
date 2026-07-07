@@ -23,6 +23,7 @@ const baseLinks: NavItem[] = [
 ]
 
 const bottomLinks: NavItem[] = [
+  { to: '/app/equipe', label: 'Equipe', icon: Users },
   { to: '/app/configuracoes', label: 'Configurações', icon: Settings },
   { to: '/pricing', label: 'Planos', icon: CreditCard },
 ]

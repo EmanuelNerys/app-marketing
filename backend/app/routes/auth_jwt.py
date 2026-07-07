@@ -299,3 +299,26 @@ async def list_users(
         )
         for u in users
     ]
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def deactivate_user(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin desativa um membro da equipe do próprio tenant."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas admins podem remover usuários.")
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Você não pode remover a si mesmo.")
+
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.tenant_id == current_user.tenant_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    user.is_active = False
+    await db.flush()
