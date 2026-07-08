@@ -8,8 +8,9 @@ Fluxo por tenant:
 4. Admin gerencia templates (criar, listar, sincronizar, deletar)
 """
 import uuid
+import secrets
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -24,8 +25,9 @@ from app.models.meta_connection import MetaConnection, PROVIDER_WHATSAPP, STATUS
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.lead import Lead
+from app.core.config import settings
 from app.services import whatsapp_service
-from app.services.meta_token_service import encrypt_token, decrypt_token
+from app.services.meta_token_service import encrypt_token, decrypt_token, exchange_code_for_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
@@ -52,6 +54,12 @@ class WppCredentialsOut(BaseModel):
     updated_at: datetime
 
 
+class EmbeddedSignupCompleteRequest(BaseModel):
+    code: str = Field(..., description="Código retornado pelo FB.login (response_type=code)")
+    waba_id: str = Field(..., description="WABA ID recebido via postMessage do fluxo")
+    phone_number_id: str = Field(..., description="Phone Number ID recebido via postMessage do fluxo")
+
+
 class SendTextRequest(BaseModel):
     to: str = Field(..., description="Número do destinatário com código do país (ex: '5583999999999')")
     text: str = Field(..., min_length=1)
@@ -72,6 +80,10 @@ class BroadcastRequest(BaseModel):
     language: str = "pt_BR"
     variables: list[str] = Field(default_factory=list,
                                  description="Valores fixos para {{1}}, {{2}}... aplicados a todos")
+    lead_ids: list[str] | None = Field(
+        default=None,
+        description="Se informado, dispara só para esses leads. Senão, todos com telefone.",
+    )
 
 
 class CreateTemplateRequest(BaseModel):
@@ -86,7 +98,113 @@ class CreateTemplateRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Credenciais — configuração manual por tenant
+# Embedded Signup — onboarding do WhatsApp direto pelo popup do Facebook
+# ---------------------------------------------------------------------------
+
+@router.get("/embedded-signup/config")
+async def embedded_signup_config(
+    current_user: User = Depends(get_current_user),
+):
+    """App ID + Configuration ID para o front inicializar o Facebook JS SDK."""
+    if not settings.whatsapp_config_id:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Embedded Signup não configurado. Defina WHATSAPP_CONFIG_ID no .env "
+                "(Meta App Dashboard > WhatsApp > Embedded Signup > Configurations)."
+            ),
+        )
+    return {"app_id": settings.meta_app_id, "config_id": settings.whatsapp_config_id}
+
+
+@router.post("/embedded-signup/complete", response_model=WppCredentialsOut, status_code=201)
+async def embedded_signup_complete(
+    body: EmbeddedSignupCompleteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Finaliza o Embedded Signup: troca o code por token, inscreve o app nos
+    webhooks do WABA, registra o número na Cloud API e salva a conexão.
+    """
+    if current_user.role != "admin":
+        raise HTTPException(403, "Apenas admins podem conectar o WhatsApp.")
+
+    try:
+        token_data = await exchange_code_for_token(body.code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    token = token_data["access_token"]
+
+    # Passo obrigatório: inscrever o app para receber webhooks deste WABA.
+    sub_result = await whatsapp_service.subscribe_app_to_waba(token, body.waba_id)
+    if sub_result.get("error"):
+        logger.warning("Falha ao inscrever app no WABA %s: %s", body.waba_id, sub_result)
+
+    # Passo obrigatório (uma vez): registrar o número na Cloud API.
+    # Se já estiver registrado, a Meta retorna erro — não é fatal.
+    pin = f"{secrets.randbelow(1_000_000):06d}"
+    reg_result = await whatsapp_service.register_phone_number(token, body.phone_number_id, pin)
+    if reg_result.get("error"):
+        logger.info(
+            "Registro do número %s retornou (pode já estar registrado): %s",
+            body.phone_number_id, reg_result.get("error"),
+        )
+
+    # Busca o número de exibição para salvar de forma amigável.
+    info = await whatsapp_service.get_phone_number_info(token, body.phone_number_id)
+    display_number = info.get("display_phone_number") or body.phone_number_id
+
+    result = await db.execute(
+        select(MetaConnection).where(
+            MetaConnection.account_id == current_user.tenant_id,
+            MetaConnection.provider == PROVIDER_WHATSAPP,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    encrypted_token = encrypt_token(token)
+
+    if conn:
+        conn.phone_number_id = body.phone_number_id
+        conn.phone_number = display_number
+        conn.waba_id = body.waba_id
+        conn.access_token_encrypted = encrypted_token
+        conn.status = STATUS_ACTIVE
+        conn.expires_at = token_data.get("expires_at")
+        conn.updated_at = datetime.now(timezone.utc)
+    else:
+        conn = MetaConnection(
+            id=str(uuid.uuid4()),
+            account_id=current_user.tenant_id,
+            provider=PROVIDER_WHATSAPP,
+            phone_number_id=body.phone_number_id,
+            phone_number=display_number,
+            waba_id=body.waba_id,
+            access_token_encrypted=encrypted_token,
+            expires_at=token_data.get("expires_at"),
+            status=STATUS_ACTIVE,
+        )
+        db.add(conn)
+
+    await db.flush()
+    logger.info(
+        "Embedded Signup concluído: tenant=%s waba=%s phone=%s",
+        current_user.tenant_id, body.waba_id, display_number,
+    )
+
+    return WppCredentialsOut(
+        id=conn.id,
+        tenant_id=conn.account_id,
+        phone_number_id=conn.phone_number_id,
+        phone_number=conn.phone_number,
+        waba_id=conn.waba_id,
+        status=conn.status,
+        updated_at=conn.updated_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credenciais — configuração manual por tenant (fallback / setups avançados)
 # ---------------------------------------------------------------------------
 
 @router.put("/credentials", response_model=WppCredentialsOut)
@@ -354,6 +472,90 @@ async def monthly_costs(
     }
 
 
+# Janela do follow-up: aparece após MIN dias sem resposta, some após MAX dias.
+FOLLOWUP_MIN_DAYS = 3
+FOLLOWUP_MAX_DAYS = 14
+
+
+@router.get("/followups")
+async def followups(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Follow-ups de templates de marketing:
+      - pending: cliente NÃO respondeu ao template há 3-14 dias (janela de follow-up)
+      - responded: cliente respondeu após o disparo (últimos 30 dias)
+    """
+    conn = await _get_conn_or_404(current_user.tenant_id, db)
+    now = datetime.now(timezone.utc)
+
+    # Nomes de templates de marketing (do cache sincronizado da Meta).
+    # Se o cache estiver vazio, considera todos os templates.
+    mkt_names = {
+        t.get("name") for t in (conn.meta_templates or [])
+        if str(t.get("category", "")).upper() == "MARKETING"
+    }
+
+    # Últimos disparos de template por conversa (30 dias)
+    result = await db.execute(
+        select(Message).where(
+            Message.tenant_id == current_user.tenant_id,
+            Message.direction == "outbound",
+            Message.template_name.isnot(None),
+            Message.created_at >= now - timedelta(days=30),
+        ).order_by(Message.created_at.desc())
+    )
+    latest_by_conv: dict[str, Message] = {}
+    for m in result.scalars().all():
+        latest_by_conv.setdefault(m.conversation_id, m)
+
+    # Nomes dos clientes
+    conv_ids = list(latest_by_conv.keys())
+    lead_names: dict[str, tuple[str | None, str | None]] = {}
+    if conv_ids:
+        rows = await db.execute(
+            select(Conversation.id, Lead.name, Lead.phone)
+            .join(Lead, Lead.id == Conversation.customer_id, isouter=True)
+            .where(Conversation.id.in_(conv_ids))
+        )
+        for cid, lname, lphone in rows.all():
+            lead_names[cid] = (lname, lphone)
+
+    pending, responded = [], []
+    for conv_id, m in latest_by_conv.items():
+        if mkt_names and m.template_name not in mkt_names:
+            continue
+
+        reply_result = await db.execute(
+            select(Message).where(
+                Message.conversation_id == conv_id,
+                Message.direction == "inbound",
+                Message.created_at > m.created_at,
+            ).order_by(Message.created_at.asc()).limit(1)
+        )
+        reply = reply_result.scalar_one_or_none()
+
+        name, phone = lead_names.get(conv_id, (None, None))
+        base = {
+            "conversation_id": conv_id,
+            "customer_name": name or phone or "Sem nome",
+            "phone": phone,
+            "template_name": m.template_name,
+            "sent_at": m.created_at.isoformat(),
+        }
+        if reply:
+            responded.append({**base, "replied_at": reply.created_at.isoformat()})
+        else:
+            days = (now - m.created_at).days
+            if FOLLOWUP_MIN_DAYS <= days <= FOLLOWUP_MAX_DAYS:
+                pending.append({**base, "days_since": days})
+
+    pending.sort(key=lambda x: x["days_since"], reverse=True)
+    responded.sort(key=lambda x: x["replied_at"], reverse=True)
+    return {"pending": pending, "responded": responded}
+
+
 async def _get_or_create_conv_for_lead(tenant_id: str, lead_id: str, db: AsyncSession) -> Conversation:
     result = await db.execute(
         select(Conversation).where(
@@ -407,13 +609,12 @@ async def broadcast_template(
     except Exception:
         raise HTTPException(400, "Não foi possível ler as credenciais do WhatsApp. Reconecte o número.")
 
-    leads = (
-        await db.execute(
-            select(Lead).where(
-                Lead.account_id == current_user.tenant_id, Lead.phone.isnot(None)
-            )
-        )
-    ).scalars().all()
+    q = select(Lead).where(
+        Lead.account_id == current_user.tenant_id, Lead.phone.isnot(None)
+    )
+    if body.lead_ids:
+        q = q.where(Lead.id.in_(body.lead_ids))
+    leads = (await db.execute(q)).scalars().all()
 
     components = None
     if body.variables:

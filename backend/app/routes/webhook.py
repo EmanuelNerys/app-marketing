@@ -14,6 +14,7 @@ import httpx
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.ws_manager import ws_manager
+from app.core.phone import normalize_phone
 from app.models.account import Account
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.automation import AutomationConfig
@@ -328,6 +329,7 @@ async def handle_whatsapp_message(
                 logger.warning("Failed to download media %s: %s", media_id, exc)
 
         # Upsert lead — cria automaticamente com nome + número quando vem do WhatsApp
+        normalized_phone = normalize_phone(wa_from) or wa_from
         lead = await _find_lead(tenant_id, wa_from, db)
         if not lead:
             customer_name = contacts.get(wa_from)
@@ -335,8 +337,8 @@ async def handle_whatsapp_message(
                 id=str(uuid.uuid4()),
                 account_id=tenant_id,
                 instagram_handle=wa_from,
-                phone=wa_from,
-                name=customer_name or wa_from,
+                phone=normalized_phone,
+                name=customer_name or normalized_phone,
                 source=LeadSource.INSTAGRAM_DM,
                 status=LeadStatus.NEW,
             )
@@ -344,7 +346,7 @@ async def handle_whatsapp_message(
             await db.flush()
         elif not lead.phone:
             # Lead já existia (ex: veio do Instagram) — agora temos o número
-            lead.phone = wa_from
+            lead.phone = normalized_phone
 
         # Find or create conversation for this wa_id
         conv = await _get_or_create_wpp_conversation(tenant_id, lead.id, db)

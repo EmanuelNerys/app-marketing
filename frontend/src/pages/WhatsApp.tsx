@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Bot, Clock, UserCheck, Send, Power, MessageSquare, Check, CheckCheck, FileText, X } from 'lucide-react'
 import api from '../services/api'
 
@@ -55,6 +55,7 @@ function MsgStatus({ status }: { status: string }) {
 
 export default function WhatsApp() {
   const myId = localStorage.getItem('user_id') || ''
+  const [searchParams] = useSearchParams()
 
   const [convs, setConvs] = useState<Conversation[]>([])
   const [queue, setQueue] = useState<Queue>('espera')
@@ -108,6 +109,21 @@ export default function WhatsApp() {
   }, [])
 
   useEffect(() => { loadConvs() }, [loadConvs])
+
+  // Deep-link: /app/whatsapp?conv=<id> abre a conversa direto (ex: vindo do Follow-ups)
+  const deepLinkApplied = useRef(false)
+  useEffect(() => {
+    if (deepLinkApplied.current) return
+    const convParam = searchParams.get('conv')
+    if (!convParam || convs.length === 0) return
+    const target = convs.find((c) => c.id === convParam)
+    if (target) {
+      deepLinkApplied.current = true
+      setQueue(queueOf(target))
+      setSelectedId(target.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convs, searchParams])
 
   useEffect(() => {
     if (selectedId) loadMessages(selectedId)

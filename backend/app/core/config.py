@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     meta_redirect_uri: str = "http://localhost:8000/api/v1/auth/meta/callback"
     meta_webhook_verify_token: str = ""
 
+    # WhatsApp Embedded Signup — Configuration ID from
+    # Meta App Dashboard > WhatsApp > Embedded Signup > Configurations
+    whatsapp_config_id: str = ""
+
     # Instagram App (Basic Display / Instagram Login)
     ig_app_id: str = ""
     ig_app_secret: str = ""

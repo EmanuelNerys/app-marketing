@@ -106,6 +106,38 @@ async def refresh_long_lived_token(token: str) -> dict:
     return await exchange_for_long_lived_token(token)
 
 
+async def exchange_code_for_token(code: str) -> dict:
+    """
+    Exchange the `code` returned by the WhatsApp Embedded Signup JS SDK flow
+    (FB.login with config_id, response_type=code) for an access token.
+
+    Unlike the redirect-based OAuth flow, this exchange does NOT take a
+    redirect_uri — the code comes from the JS SDK login dialog, not a
+    server-side redirect.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{settings.meta_graph_url}/oauth/access_token",
+            params={
+                "client_id": settings.meta_app_id,
+                "client_secret": settings.meta_app_secret,
+                "code": code,
+            },
+        )
+    data = resp.json()
+    if "access_token" not in data:
+        raise ValueError(f"Embedded Signup code exchange failed: {data.get('error', data)}")
+
+    expires_in = data.get("expires_in")
+    return {
+        "access_token": data["access_token"],
+        "expires_at": (
+            datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+            if expires_in else None
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Signed OAuth state (anti-CSRF)
 # ---------------------------------------------------------------------------

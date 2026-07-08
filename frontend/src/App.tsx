@@ -18,6 +18,7 @@ import Marketing from './pages/Marketing'
 import WhatsApp from './pages/WhatsApp'
 import Templates from './pages/Templates'
 import Equipe from './pages/Equipe'
+import FollowUps from './pages/FollowUps'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import VerifyEmail from './pages/VerifyEmail'
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="/app/whatsapp" element={<WhatsApp />} />
           <Route path="/app/templates" element={<Templates />} />
           <Route path="/app/equipe" element={<Equipe />} />
+          <Route path="/app/followups" element={<FollowUps />} />
           <Route path="/app/leads" element={<Leads />} />
           <Route path="/app/configuracoes" element={<Configuracoes />} />
           <Route path="/app/clientes" element={<Clients />} />

@@ -21,6 +21,7 @@ import app.models.conversation      # noqa: F401
 import app.models.message           # noqa: F401
 import app.models.subscription      # noqa: F401
 import app.models.schedule          # noqa: F401
+import app.models.client_assignment # noqa: F401
 
 logging.basicConfig(level=logging.INFO)
 

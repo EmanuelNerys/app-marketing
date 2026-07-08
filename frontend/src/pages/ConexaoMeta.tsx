@@ -1,7 +1,34 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 
 type Provider = 'instagram' | 'whatsapp' | 'ads'
+
+declare global {
+  interface Window {
+    FB?: any
+    fbAsyncInit?: () => void
+  }
+}
+
+function loadFacebookSdk(appId: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (window.FB) {
+      resolve()
+      return
+    }
+    window.fbAsyncInit = () => {
+      window.FB!.init({ appId, autoLogAppEvents: true, xfbml: false, version: 'v21.0' })
+      resolve()
+    }
+    if (document.getElementById('facebook-jssdk')) return
+    const script = document.createElement('script')
+    script.id = 'facebook-jssdk'
+    script.src = 'https://connect.facebook.net/en_US/sdk.js'
+    script.async = true
+    script.defer = true
+    document.body.appendChild(script)
+  })
+}
 
 interface Connection {
   id: string
@@ -9,11 +36,28 @@ interface Connection {
   page_id: string | null
   ig_business_account_id: string | null
   waba_id: string | null
+  phone_number: string | null
   ad_account_id: string | null
   status: 'active' | 'expired' | 'needs_reauth' | 'revoked'
   expires_at: string | null
   scopes: string[]
   created_at: string
+}
+
+/** Detalhe específico do provider mostrado no card quando conectado. */
+function connectionDetail(conn: Connection): string | null {
+  switch (conn.provider) {
+    case 'whatsapp':
+      return conn.phone_number
+        ? `Número: ${conn.phone_number}${conn.waba_id ? ` · WABA ${conn.waba_id}` : ''}`
+        : conn.waba_id ? `WABA: ${conn.waba_id}` : null
+    case 'instagram':
+      return conn.ig_business_account_id
+        ? `Conta IG: ${conn.ig_business_account_id}${conn.page_id ? ` · Página ${conn.page_id}` : ''}`
+        : conn.page_id ? `Página: ${conn.page_id}` : null
+    case 'ads':
+      return conn.ad_account_id ? `Ad Account: ${conn.ad_account_id}` : null
+  }
 }
 
 const PROVIDERS: { key: Provider; label: string; icon: string; description: string }[] = [
@@ -64,11 +108,105 @@ export default function ConexaoMeta() {
     state: null,
     provider: null,
   })
+  const [waError, setWaError] = useState('')
+
+  const waCode = useRef<string | null>(null)
+  const waPayload = useRef<{ waba_id?: string; phone_number_id?: string } | null>(null)
+  const waCompleting = useRef(false)
 
   useEffect(() => {
     if (accountId) loadConnections()
     else setLoading(false)
   }, [accountId])
+
+  // Escuta os eventos do Embedded Signup emitidos pela janela do Facebook
+  // (postMessage com origin facebook.com, formato WA_EMBEDDED_SIGNUP).
+  useEffect(() => {
+    function onFbMessage(event: MessageEvent) {
+      if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return
+      let data: any
+      try {
+        data = JSON.parse(event.data)
+      } catch {
+        return
+      }
+      if (data?.type !== 'WA_EMBEDDED_SIGNUP') return
+
+      if (data.event === 'CANCEL') {
+        setConnecting(null)
+        setModal({ state: null, provider: null })
+      } else if (data.event === 'ERROR') {
+        setWaError(data.data?.error_message || 'Erro no cadastro do WhatsApp.')
+        setConnecting(null)
+        setModal({ state: null, provider: null })
+      } else if (typeof data.event === 'string' && data.event.startsWith('FINISH')) {
+        waPayload.current = {
+          waba_id: data.data?.waba_id,
+          phone_number_id: data.data?.phone_number_id,
+        }
+        tryCompleteEmbeddedSignup()
+      }
+    }
+    window.addEventListener('message', onFbMessage)
+    return () => window.removeEventListener('message', onFbMessage)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function tryCompleteEmbeddedSignup() {
+    if (waCompleting.current) return
+    if (!waCode.current || !waPayload.current?.waba_id || !waPayload.current?.phone_number_id) return
+    waCompleting.current = true
+    try {
+      await api.post('/whatsapp/embedded-signup/complete', {
+        code: waCode.current,
+        waba_id: waPayload.current.waba_id,
+        phone_number_id: waPayload.current.phone_number_id,
+      })
+      setConnecting(null)
+      setModal({ state: 'success', provider: 'whatsapp' })
+      loadConnections()
+    } catch (err: any) {
+      setWaError(err.response?.data?.detail || 'Erro ao finalizar a conexão do WhatsApp.')
+      setModal({ state: null, provider: null })
+    } finally {
+      waCode.current = null
+      waPayload.current = null
+      waCompleting.current = false
+    }
+  }
+
+  async function handleConnectWhatsApp() {
+    setError('')
+    setWaError('')
+    setConnecting('whatsapp')
+    try {
+      const { data } = await api.get<{ app_id: string; config_id: string }>('/whatsapp/embedded-signup/config')
+      await loadFacebookSdk(data.app_id)
+
+      setModal({ state: 'waiting', provider: 'whatsapp' })
+      window.FB.login(
+        (response: any) => {
+          if (response.authResponse?.code) {
+            waCode.current = response.authResponse.code
+            tryCompleteEmbeddedSignup()
+          } else {
+            setConnecting(null)
+            setModal({ state: null, provider: null })
+          }
+        },
+        {
+          config_id: data.config_id,
+          response_type: 'code',
+          override_default_response_type: true,
+          extras: { setup: {}, sessionInfoVersion: '3' },
+        },
+      )
+    } catch (err: any) {
+      setWaError(err.response?.data?.detail || 'Embedded Signup não configurado.')
+      setConnecting(null)
+      setModal({ state: null, provider: null })
+    }
+  }
 
   useEffect(() => {
     // Recebe mensagem do popup OAuth quando conectar com sucesso
@@ -96,6 +234,11 @@ export default function ConexaoMeta() {
   }
 
   async function handleConnect(provider: Provider) {
+    if (provider === 'whatsapp') {
+      await handleConnectWhatsApp()
+      return
+    }
+
     const tid = localStorage.getItem('tenant_id')
     if (!tid) {
       setError('Conta não identificada. Faça login primeiro.')
@@ -221,6 +364,11 @@ export default function ConexaoMeta() {
           {error}
         </div>
       )}
+      {waError && (
+        <div className="mb-4 bg-red-900/20 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">
+          {waError}
+        </div>
+      )}
 
       {loading ? (
         <div className="text-[#555] text-sm">Carregando conexões...</div>
@@ -250,6 +398,9 @@ export default function ConexaoMeta() {
                     )}
                   </div>
                   <p className="text-[#555] text-xs mt-0.5">{description}</p>
+                  {conn && isConnected && connectionDetail(conn) && (
+                    <p className="text-emerald-400/80 text-xs mt-1 truncate">{connectionDetail(conn)}</p>
+                  )}
                   {conn?.expires_at && (
                     <p className="text-[#444] text-xs mt-1">
                       Expira em: {new Date(conn.expires_at).toLocaleDateString('pt-BR')}
@@ -282,71 +433,83 @@ export default function ConexaoMeta() {
         </div>
       )}
 
-      {/* Modal de conexão OAuth */}
-      {modal.state !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
-            {/* Header com gradiente Instagram */}
-            <div className="h-1.5 bg-gradient-to-r from-[#f09433] via-[#e6683c] via-[#dc2743] via-[#cc2366] to-[#bc1888]" />
+      {/* Modal de conexão OAuth / Embedded Signup */}
+      {modal.state !== null && modal.provider && (() => {
+        const isWa = modal.provider === 'whatsapp'
+        const gradient = isWa
+          ? 'from-[#25d366] to-[#128c7e]'
+          : 'from-[#f09433] via-[#dc2743] to-[#bc1888]'
+        const gradientBar = isWa
+          ? 'from-[#25d366] to-[#128c7e]'
+          : 'from-[#f09433] via-[#e6683c] via-[#dc2743] via-[#cc2366] to-[#bc1888]'
+        const icon = PROVIDERS.find(p => p.key === modal.provider)?.icon ?? '🔗'
+        const label = PROVIDERS.find(p => p.key === modal.provider)?.label ?? modal.provider
 
-            <div className="p-8 flex flex-col items-center text-center">
-              {modal.state === 'waiting' ? (
-                <>
-                  {/* Ícone animado */}
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#f09433] via-[#dc2743] to-[#bc1888] flex items-center justify-center mb-5 shadow-lg">
-                    <span className="text-3xl">📸</span>
-                  </div>
-                  <h3 className="text-[#e2e2e8] font-semibold text-base mb-2">Conectando Instagram</h3>
-                  <p className="text-[#555] text-sm mb-6">
-                    Autorize o acesso na janela do Instagram que abriu. Aguardando...
-                  </p>
-                  {/* Spinner */}
-                  <div className="flex gap-1.5 mb-6">
-                    {[0, 1, 2].map(i => (
-                      <div
-                        key={i}
-                        className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce"
-                        style={{ animationDelay: `${i * 0.15}s` }}
-                      />
-                    ))}
-                  </div>
-                  <button
-                    onClick={closeModal}
-                    className="text-[#444] text-xs hover:text-[#666] transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                </>
-              ) : (
-                <>
-                  {/* Sucesso */}
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#f09433] via-[#dc2743] to-[#bc1888] flex items-center justify-center mb-5 shadow-lg">
-                    <span className="text-3xl">📸</span>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center -mt-10 ml-10 mb-3 border-2 border-[#111118]">
-                    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                  <h3 className="text-[#e2e2e8] font-semibold text-base mb-1">Instagram conectado!</h3>
-                  {modal.username && (
-                    <p className="text-indigo-400 text-sm font-medium mb-1">@{modal.username}</p>
-                  )}
-                  <p className="text-[#555] text-xs mb-6">
-                    Sua conta está pronta para DMs, comentários e publicações.
-                  </p>
-                  <button
-                    onClick={closeModal}
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors"
-                  >
-                    Fechar
-                  </button>
-                </>
-              )}
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-[#111118] border border-white/[0.08] rounded-2xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
+              <div className={`h-1.5 bg-gradient-to-r ${gradientBar}`} />
+
+              <div className="p-8 flex flex-col items-center text-center">
+                {modal.state === 'waiting' ? (
+                  <>
+                    <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center mb-5 shadow-lg`}>
+                      <span className="text-3xl">{icon}</span>
+                    </div>
+                    <h3 className="text-[#e2e2e8] font-semibold text-base mb-2">Conectando {label}</h3>
+                    <p className="text-[#555] text-sm mb-6">
+                      {isWa
+                        ? 'Complete o cadastro na janela do Facebook que abriu. Aguardando...'
+                        : `Autorize o acesso na janela do ${label} que abriu. Aguardando...`}
+                    </p>
+                    <div className="flex gap-1.5 mb-6">
+                      {[0, 1, 2].map(i => (
+                        <div
+                          key={i}
+                          className="w-2 h-2 rounded-full bg-indigo-500 animate-bounce"
+                          style={{ animationDelay: `${i * 0.15}s` }}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={closeModal}
+                      className="text-[#444] text-xs hover:text-[#666] transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center mb-5 shadow-lg`}>
+                      <span className="text-3xl">{icon}</span>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center -mt-10 ml-10 mb-3 border-2 border-[#111118]">
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <h3 className="text-[#e2e2e8] font-semibold text-base mb-1">{label} conectado!</h3>
+                    {modal.username && (
+                      <p className="text-indigo-400 text-sm font-medium mb-1">@{modal.username}</p>
+                    )}
+                    <p className="text-[#555] text-xs mb-6">
+                      {isWa
+                        ? 'Seu número está pronto para enviar e receber mensagens.'
+                        : 'Sua conta está pronta para DMs, comentários e publicações.'}
+                    </p>
+                    <button
+                      onClick={closeModal}
+                      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors"
+                    >
+                      Fechar
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

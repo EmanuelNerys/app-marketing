@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Users, Plus, Trash2, X, Eye, EyeOff, Shield, User as UserIcon } from 'lucide-react'
+import { Users, Plus, Trash2, X, Eye, EyeOff, Shield, User as UserIcon, Building2 } from 'lucide-react'
 import api from '../services/api'
 
 interface Member {
@@ -8,6 +8,11 @@ interface Member {
   full_name: string | null
   role: string
   is_active: boolean
+}
+
+interface ClientLite {
+  id: string
+  brand_name: string
 }
 
 export default function Equipe() {
@@ -25,6 +30,13 @@ export default function Equipe() {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
 
+  // Atribuição de empresas (agência)
+  const [isAgency, setIsAgency] = useState(false)
+  const [clients, setClients] = useState<ClientLite[]>([])
+  const [assignMember, setAssignMember] = useState<Member | null>(null)
+  const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set())
+  const [savingAssign, setSavingAssign] = useState(false)
+
   useEffect(() => { load() }, [])
 
   async function load() {
@@ -32,10 +44,51 @@ export default function Equipe() {
     try {
       const { data } = await api.get('/auth/users')
       setMembers(data)
+      try {
+        const me = (await api.get('/auth/me')).data
+        if (me.plan_type === 'agencia') {
+          setIsAgency(true)
+          const list = (await api.get('/auth/clients')).data
+          setClients(list.map((c: any) => ({ id: c.id, brand_name: c.brand_name })))
+        }
+      } catch { /* não é agência ou sem permissão */ }
     } catch {
       setError('Erro ao carregar a equipe.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function openAssign(m: Member) {
+    setAssignMember(m)
+    setAssignedIds(new Set())
+    try {
+      const { data } = await api.get(`/auth/clients/assignments/${m.id}`)
+      setAssignedIds(new Set(data.client_ids))
+    } catch { /* começa vazio */ }
+  }
+
+  function toggleAssign(id: string) {
+    setAssignedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function saveAssignments() {
+    if (!assignMember) return
+    setSavingAssign(true)
+    try {
+      await api.put(`/auth/clients/assignments/${assignMember.id}`, {
+        client_ids: [...assignedIds],
+      })
+      setAssignMember(null)
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Erro ao salvar atribuições.')
+    } finally {
+      setSavingAssign(false)
     }
   }
 
@@ -121,14 +174,25 @@ export default function Equipe() {
                 </div>
                 <p className="text-[11px] text-[#555] mt-0.5">@{m.username}</p>
               </div>
-              {m.id !== myId && (
-                <button
-                  onClick={() => handleDelete(m.id)}
-                  className="p-1.5 bg-red-900/20 text-red-400 rounded-lg hover:bg-red-900/40 transition-colors shrink-0"
-                >
-                  <Trash2 size={13} />
-                </button>
-              )}
+              <div className="flex gap-2 shrink-0">
+                {isAgency && m.role !== 'admin' && (
+                  <button
+                    onClick={() => openAssign(m)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 rounded-lg text-xs font-semibold hover:bg-indigo-600/25 transition-colors"
+                  >
+                    <Building2 size={12} />
+                    Empresas
+                  </button>
+                )}
+                {m.id !== myId && (
+                  <button
+                    onClick={() => handleDelete(m.id)}
+                    className="p-1.5 bg-red-900/20 text-red-400 rounded-lg hover:bg-red-900/40 transition-colors"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -194,6 +258,65 @@ export default function Equipe() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: atribuir empresas ao membro */}
+      {assignMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-6 w-full max-w-md max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-semibold text-white">Empresas de {assignMember.full_name || assignMember.username}</h3>
+              <button onClick={() => setAssignMember(null)} className="text-[#444] hover:text-[#888]"><X size={18} /></button>
+            </div>
+            <p className="text-xs text-[#555] mb-4">
+              Este membro só vai ver e acessar as empresas marcadas abaixo.
+            </p>
+
+            {clients.length === 0 ? (
+              <p className="text-[#5a5a6e] text-sm text-center py-6">Nenhuma empresa cadastrada ainda.</p>
+            ) : (
+              <div className="space-y-1.5 mb-5">
+                {clients.map((c) => {
+                  const checked = assignedIds.has(c.id)
+                  return (
+                    <label
+                      key={c.id}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors ${
+                        checked
+                          ? 'bg-indigo-600/10 border-indigo-500/40'
+                          : 'bg-[#0a0a0f] border-white/[0.06] hover:border-white/[0.14]'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleAssign(c.id)}
+                        className="accent-indigo-600"
+                      />
+                      <div className="w-7 h-7 rounded-lg bg-white/[0.05] flex items-center justify-center text-[10px] font-bold text-[#8a8a9e]">
+                        {c.brand_name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className={`text-sm ${checked ? 'text-[#e2e2e8]' : 'text-[#8a8a9e]'}`}>{c.brand_name}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button onClick={() => setAssignMember(null)} className="flex-1 py-2.5 border border-white/[0.08] text-[#666] hover:text-white text-sm font-medium rounded-lg transition-colors">
+                Cancelar
+              </button>
+              <button
+                onClick={saveAssignments}
+                disabled={savingAssign}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                {savingAssign ? 'Salvando…' : `Salvar (${assignedIds.size})`}
+              </button>
+            </div>
           </div>
         </div>
       )}

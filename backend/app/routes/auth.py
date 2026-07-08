@@ -466,6 +466,7 @@ def _serialize_connection(c: MetaConnection) -> dict:
         "page_id": c.page_id,
         "ig_business_account_id": c.ig_business_account_id,
         "waba_id": c.waba_id,
+        "phone_number": c.phone_number,
         "ad_account_id": c.ad_account_id,
         "status": c.status,
         "expires_at": c.expires_at.isoformat() if c.expires_at else None,

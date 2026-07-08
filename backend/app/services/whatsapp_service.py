@@ -128,6 +128,43 @@ async def mark_as_read(token: str, phone_number_id: str, message_id: str) -> dic
 
 
 # ---------------------------------------------------------------------------
+# Embedded Signup — pós-onboarding do WABA
+# ---------------------------------------------------------------------------
+
+async def subscribe_app_to_waba(token: str, waba_id: str) -> dict:
+    """Inscreve o app para receber webhooks deste WABA (obrigatório após o signup)."""
+    return await _request(
+        "POST",
+        f"{settings.meta_graph_url}/{waba_id}/subscribed_apps",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+async def register_phone_number(token: str, phone_number_id: str, pin: str) -> dict:
+    """
+    Finaliza o registro do número na Cloud API (obrigatório uma vez após o
+    Embedded Signup). O PIN é usado apenas para verificação em duas etapas
+    caso o número seja migrado no futuro.
+    """
+    return await _request(
+        "POST",
+        f"{settings.meta_graph_url}/{phone_number_id}/register",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"messaging_product": "whatsapp", "pin": pin},
+    )
+
+
+async def get_phone_number_info(token: str, phone_number_id: str) -> dict:
+    """Busca o número de exibição e o nome verificado do Phone Number ID."""
+    return await _request(
+        "GET",
+        f"{settings.meta_graph_url}/{phone_number_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"fields": "display_phone_number,verified_name"},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Download de mídia
 # ---------------------------------------------------------------------------
 
