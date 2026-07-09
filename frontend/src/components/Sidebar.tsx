@@ -1,43 +1,101 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Clapperboard, Megaphone, Link2, Send,
   Zap, Users, Settings, CreditCard, Building2, LogOut,
-  ChevronRight,
+  ChevronRight, ChevronDown, MessageSquare, FileText, Clock,
+  Headphones, Camera,
   type LucideIcon,
 } from 'lucide-react'
 import api from '../services/api'
 import AccountSwitcher from './AccountSwitcher'
 
-type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean }
+type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean; sub?: string }
+type NavGroup = { id: string; label: string; icon: LucideIcon; items: NavItem[] }
 
-const baseLinks: NavItem[] = [
+const topLinks: NavItem[] = [
   { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/app/studio', label: 'Studio de Criação', icon: Clapperboard },
-  { to: '/app/marketing', label: 'Marketing', icon: Megaphone },
-  { to: '/app/conexao', label: 'Conexão Meta', icon: Link2 },
-  { to: '/app/publicar', label: 'Publicar', icon: Send },
-  { to: '/app/automacao', label: 'Automação', icon: Zap },
   { to: '/app/leads', label: 'Leads', icon: Users },
+  { to: '/app/conexao', label: 'Conexão Meta', icon: Link2 },
 ]
 
 const bottomLinks: NavItem[] = [
+  { to: '/app/equipe', label: 'Equipe', icon: Users },
   { to: '/app/configuracoes', label: 'Configurações', icon: Settings },
   { to: '/pricing', label: 'Planos', icon: CreditCard },
 ]
 
+function navItemClass(isActive: boolean): string {
+  return `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+    isActive
+      ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/20'
+      : 'text-[#5a5a6e] hover:bg-white/[0.04] hover:text-[#c0c0d0]'
+  }`
+}
+
 export default function Sidebar() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [planType, setPlanType] = useState<string | null>(null)
+  const [waNumber, setWaNumber] = useState<string | null>(null)
+
+  const groups: NavGroup[] = [
+    {
+      id: 'atendimento',
+      label: 'Atendimento ao Cliente',
+      icon: Headphones,
+      items: [
+        { to: '/app/whatsapp', label: 'WhatsApp', icon: MessageSquare, sub: waNumber ?? undefined },
+        { to: '/app/templates', label: 'Templates', icon: FileText },
+        { to: '/app/followups', label: 'Follow-ups', icon: Clock },
+      ],
+    },
+    {
+      id: 'instagram',
+      label: 'Instagram',
+      icon: Camera,
+      items: [
+        { to: '/app/studio', label: 'Studio de Criação', icon: Clapperboard },
+        { to: '/app/publicar', label: 'Publicar', icon: Send },
+        { to: '/app/instagram-dm', label: 'Direct', icon: MessageSquare },
+        { to: '/app/automacao', label: 'Automação', icon: Zap },
+      ],
+    },
+    {
+      id: 'ads',
+      label: 'Meta Ads',
+      icon: Megaphone,
+      items: [
+        { to: '/app/marketing', label: 'Campanhas', icon: Megaphone },
+      ],
+    },
+  ]
+
+  // Abre por padrão o grupo que contém a rota atual
+  const [open, setOpen] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {}
+    for (const g of groups) {
+      initial[g.id] = g.items.some((i) => location.pathname.startsWith(i.to))
+    }
+    return initial
+  })
 
   useEffect(() => {
     api.get('/auth/me').then(({ data }) => {
       if (data?.plan_type) setPlanType(data.plan_type)
     }).catch(() => {})
+
+    // Número do WhatsApp conectado (via Meta) — mostrado sob o item WhatsApp
+    api.get('/whatsapp/credentials').then(({ data }) => {
+      if (data?.phone_number) setWaNumber(data.phone_number)
+    }).catch(() => {})
   }, [])
 
-  const mainLinks = baseLinks
   const isAgency = planType === 'agencia'
+
+  function toggleGroup(id: string) {
+    setOpen((prev) => ({ ...prev, [id]: !prev[id] }))
+  }
 
   function handleLogout() {
     localStorage.clear()
@@ -65,28 +123,72 @@ export default function Sidebar() {
       <AccountSwitcher />
 
       {/* Main nav */}
-      <nav className="flex-1 px-3 py-2 flex flex-col gap-0.5">
+      <nav className="flex-1 px-3 py-2 flex flex-col gap-0.5 overflow-y-auto">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-[#3a3a4a] px-2 mb-2 mt-1">
           Principal
         </p>
-        {mainLinks.map((link) => {
+        {topLinks.map((link) => {
           const Icon = link.icon
           return (
             <NavLink
               key={link.to}
               to={link.to}
               end={'end' in link ? link.end : false}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all group ${
-                  isActive
-                    ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/20'
-                    : 'text-[#5a5a6e] hover:bg-white/[0.04] hover:text-[#c0c0d0]'
-                }`
-              }
+              className={({ isActive }) => navItemClass(isActive)}
             >
               <Icon size={15} strokeWidth={1.75} />
               <span className="flex-1">{link.label}</span>
             </NavLink>
+          )
+        })}
+
+        {/* Grupos (dropdown) */}
+        {groups.map((group) => {
+          const GroupIcon = group.icon
+          const isOpen = !!open[group.id]
+          const hasActive = group.items.some((i) => location.pathname.startsWith(i.to))
+          return (
+            <div key={group.id} className="mt-1">
+              <button
+                onClick={() => toggleGroup(group.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  hasActive && !isOpen
+                    ? 'text-indigo-300'
+                    : 'text-[#7a7a8e] hover:bg-white/[0.04] hover:text-[#c0c0d0]'
+                }`}
+              >
+                <GroupIcon size={15} strokeWidth={1.75} />
+                <span className="flex-1 text-left">{group.label}</span>
+                {isOpen
+                  ? <ChevronDown size={13} className="opacity-50" />
+                  : <ChevronRight size={13} className="opacity-50" />}
+              </button>
+
+              {isOpen && (
+                <div className="ml-3 pl-3 border-l border-white/[0.06] flex flex-col gap-0.5 mt-0.5">
+                  {group.items.map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        className={({ isActive }) => navItemClass(isActive)}
+                      >
+                        <Icon size={14} strokeWidth={1.75} />
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate">{item.label}</span>
+                          {item.sub && (
+                            <span className="block text-[10px] text-emerald-500/80 truncate leading-tight">
+                              {item.sub}
+                            </span>
+                          )}
+                        </span>
+                      </NavLink>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           )
         })}
 
@@ -98,13 +200,7 @@ export default function Sidebar() {
             </p>
             <NavLink
               to="/app/clientes"
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  isActive
-                    ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/20'
-                    : 'text-[#5a5a6e] hover:bg-white/[0.04] hover:text-[#c0c0d0]'
-                }`
-              }
+              className={({ isActive }) => navItemClass(isActive)}
             >
               <Building2 size={15} strokeWidth={1.75} />
               <span className="flex-1">Clientes</span>
@@ -122,13 +218,7 @@ export default function Sidebar() {
             <NavLink
               key={link.to}
               to={link.to}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  isActive
-                    ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/20'
-                    : 'text-[#5a5a6e] hover:bg-white/[0.04] hover:text-[#c0c0d0]'
-                }`
-              }
+              className={({ isActive }) => navItemClass(isActive)}
             >
               <Icon size={15} strokeWidth={1.75} />
               {link.label}

@@ -8,12 +8,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 import httpx
 
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.ws_manager import ws_manager
+from app.core.phone import normalize_phone
 from app.models.account import Account
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.automation import AutomationConfig
@@ -190,52 +191,186 @@ async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
 
 async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
     """
-    Payload example:
+    Payload example (mensagem):
     {
       "sender": {"id": "PSID_DO_USUARIO"},
-      "recipient": {"id": "PAGE_ID"},
+      "recipient": {"id": "IG_BUSINESS_ID"},
       "timestamp": 1234567890,
-      "message": {"mid": "MSG_ID", "text": "oi quero informações"}
+      "message": {
+        "mid": "MSG_ID", "text": "oi quero informações", "is_echo": false,
+        "attachments": [{"type": "image", "payload": {"url": "https://..."}}],
+        "reply_to": {"mid": "MSG_ID_ANTERIOR"}
+      }
     }
+    Ou uma reação: {"sender": {...}, "recipient": {...},
+                     "reaction": {"mid": "MSG_ID", "action": "react", "emoji": "❤️"}}
     """
+    tenant_id = account.id
     sender_id = value.get("sender", {}).get("id", "")
-    message = value.get("message", {})
-    message_text = message.get("text", "")
+    recipient_id = value.get("recipient", {}).get("id", "")
+    if not sender_id or not recipient_id:
+        return
+
+    # ---- Reação a uma mensagem existente: atualiza, não cria nova ----
+    reaction = value.get("reaction")
+    if reaction:
+        target_mid = reaction.get("mid")
+        removed = reaction.get("action") == "unreact"
+        emoji = None if removed else (reaction.get("emoji") or reaction.get("reaction"))
+        if target_mid:
+            result = await db.execute(
+                select(Message).where(Message.message_id == target_mid, Message.tenant_id == tenant_id)
+            )
+            target = result.scalar_one_or_none()
+            if target:
+                target.payload = {**(target.payload or {}), "customer_reaction": emoji}
+                await db.flush()
+                await ws_manager.broadcast(tenant_id, "message_reaction", {
+                    "conversation_id": target.conversation_id,
+                    "message_db_id": target.id,
+                    "emoji": emoji,
+                    "from": "customer",
+                })
+        return
+
+    message = value.get("message")
+    if not message:
+        return  # outros eventos (read receipt, postback, etc.) não tratados por ora
+
+    # Eco de mensagem enviada pelo próprio app (via API ou Instagram Direct) — ignora
+    if message.get("is_echo"):
+        return
+
     message_id = message.get("mid", "")
+    message_text = message.get("text")
 
-    # Ignora eco de mensagens enviadas pelo próprio app
-    if value.get("sender", {}).get("id") == value.get("recipient", {}).get("id"):
-        return
+    # Mídia recebida — a Instagram Messaging API já devolve uma URL pública
+    # (temporária), sem exigir Bearer token como o WhatsApp Cloud API.
+    media_type: str | None = None
+    media_url: str | None = None
+    attachments = message.get("attachments") or []
+    if attachments:
+        att = attachments[0]
+        att_type = att.get("type")
+        att_url = att.get("payload", {}).get("url")
+        if att_type in ("image", "video", "audio"):
+            media_type, media_url = att_type, att_url
+        elif att_type == "file":
+            media_type, media_url = "document", att_url
+        elif not message_text:
+            # share/story_mention/reel etc. sem preview tratável — vira texto com link
+            message_text = f"[{att_type or 'anexo'}] {att_url or ''}".strip()
 
-    if not sender_id:
-        return
+    # Quote: cliente respondeu citando uma mensagem anterior
+    context_text: str | None = None
+    reply_to_mid = message.get("reply_to", {}).get("mid")
+    if reply_to_mid:
+        result = await db.execute(
+            select(Message).where(Message.message_id == reply_to_mid, Message.tenant_id == tenant_id)
+        )
+        quoted = result.scalar_one_or_none()
+        if quoted:
+            context_text = quoted.text or f"[{quoted.media_type or 'mídia'}]"
 
-    # Salva o lead (upsert — mesma pessoa pode mandar vários DMs)
-    existing = await _find_lead(account.id, sender_id, db)
-    if not existing:
+    # Upsert lead (PSID como handle externo — nome real pode ser buscado depois)
+    lead = await _find_lead(tenant_id, sender_id, db)
+    if not lead:
         lead = Lead(
-            account_id=account.id,
-            instagram_handle=sender_id,  # PSID; handle real pode ser buscado depois
+            id=str(uuid.uuid4()),
+            account_id=tenant_id,
+            instagram_handle=sender_id,
+            name=sender_id,
             source=LeadSource.INSTAGRAM_DM,
             status=LeadStatus.NEW,
             metadata_json=json.dumps({"first_message": message_text}),
         )
         db.add(lead)
-        logger.info("Novo lead (DM): %s | conta %s", sender_id, account.id)
+        logger.info("Novo lead (DM): %s | conta %s", sender_id, tenant_id)
+        await db.flush()
 
-    # Verifica automações e responde
-    if message_text:
-        matched = await _match_automation(account.id, message_text, db, channel="dm")
+    conv = await _get_or_create_conversation(tenant_id, lead.id, "instagram", db)
+
+    msg = Message(
+        tenant_id=tenant_id,
+        conversation_id=conv.id,
+        sender=sender_id,
+        text=message_text,
+        direction="inbound",
+        wa_id=sender_id,
+        status="delivered",
+        message_id=message_id,
+        media_type=media_type,
+        media_url=media_url,
+        context_text=context_text,
+        payload=message,
+        is_within_24h_window=True,
+    )
+    db.add(msg)
+
+    conv.unread_count = (conv.unread_count or 0) + 1
+    conv.last_updated = datetime.now(timezone.utc)
+    conv.atendimento_status = "aberto"
+    await db.flush()
+    await db.refresh(msg)
+
+    await ws_manager.broadcast(tenant_id, "new_message", {
+        "id": msg.id,
+        "conversation_id": conv.id,
+        "wa_id": sender_id,
+        "sender": sender_id,
+        "text": message_text,
+        "media_type": media_type,
+        "media_url": media_url,
+        "context_text": context_text,
+        "direction": "inbound",
+        "status": "delivered",
+        "message_id": message_id,
+        "created_at": msg.created_at.isoformat(),
+    })
+    await ws_manager.broadcast(tenant_id, "conversation_updated", {
+        "id": conv.id,
+        "unread_count": conv.unread_count,
+        "atendimento_status": conv.atendimento_status,
+        "last_updated": conv.last_updated.isoformat(),
+    })
+
+    # Auto-reply por keyword (se configurado e bot ativo na conversa)
+    if message_text and conv.bot_active:
+        matched = await _match_automation(tenant_id, message_text, db, channel="dm")
         if matched:
             token = await _get_token(account, db)
             if token:
                 try:
-                    await instagram_service.send_dm(token, sender_id, matched.auto_reply_message)
+                    resp = await instagram_service.send_dm(token, sender_id, matched.auto_reply_message)
+                    bot_mid = resp.get("message_id")
+                    bot_msg = Message(
+                        tenant_id=tenant_id,
+                        conversation_id=conv.id,
+                        sender="bot",
+                        text=matched.auto_reply_message,
+                        direction="outbound",
+                        wa_id=sender_id,
+                        status="sent",
+                        message_id=bot_mid,
+                        is_within_24h_window=True,
+                    )
+                    db.add(bot_msg)
+                    await db.flush()
+                    await ws_manager.broadcast(tenant_id, "new_message", {
+                        "id": bot_msg.id,
+                        "conversation_id": conv.id,
+                        "sender": "bot",
+                        "text": matched.auto_reply_message,
+                        "direction": "outbound",
+                        "wa_id": sender_id,
+                        "status": "sent",
+                        "created_at": bot_msg.created_at.isoformat(),
+                    })
                     logger.info("Auto-reply DM enviado para %s", sender_id)
                 except Exception as exc:
                     logger.warning("Falha no auto-reply de DM: %s", exc)
 
-    await dispatch_event("ig_dm", account.id, value)
+    await dispatch_event("ig_dm", tenant_id, value)
 
 
 # ---------------------------------------------------------------------------
@@ -275,9 +410,24 @@ async def handle_whatsapp_message(
                 msg.status = new_status
                 if category and pricing.get("billable"):
                     msg.meta_category = category
+
+                # Falha de entrega: guarda o motivo para exibir no chat
+                error_detail: str | None = None
+                if new_status == "failed":
+                    errors = status_evt.get("errors") or []
+                    if errors:
+                        err = errors[0]
+                        error_detail = (
+                            err.get("error_data", {}).get("details")
+                            or err.get("title")
+                            or err.get("message")
+                        )
+                        msg.payload = {**(msg.payload or {}), "error": error_detail}
+
                 await ws_manager.broadcast(tenant_id, "message_status_updated",
                                            {"message_id": wamid, "status": new_status,
-                                            "conversation_id": msg.conversation_id})
+                                            "conversation_id": msg.conversation_id,
+                                            "error": error_detail})
         # Increment monthly counters
         if category and pricing.get("billable"):
             if category == "marketing":
@@ -289,6 +439,9 @@ async def handle_whatsapp_message(
             elif category == "authentication":
                 conn.conv_count_auth = (conn.conv_count_auth or 0) + 1
 
+    if value.get("statuses"):
+        await db.flush()
+
     # ---- Incoming messages ----
     contacts = {c["wa_id"]: c.get("profile", {}).get("name") for c in value.get("contacts", [])}
 
@@ -298,11 +451,36 @@ async def handle_whatsapp_message(
         msg_type = msg_data.get("type", "text")
         timestamp = int(msg_data.get("timestamp", 0))
 
+        # ---- Reação do cliente: atualiza a mensagem original, não cria nova ----
+        if msg_type == "reaction":
+            reaction = msg_data.get("reaction", {})
+            target_wamid = reaction.get("message_id")
+            emoji = reaction.get("emoji")  # ausente = reação removida
+            if target_wamid:
+                result = await db.execute(
+                    select(Message).where(
+                        Message.message_id == target_wamid,
+                        Message.tenant_id == tenant_id,
+                    )
+                )
+                target = result.scalar_one_or_none()
+                if target:
+                    target.payload = {**(target.payload or {}), "customer_reaction": emoji}
+                    await db.flush()
+                    await ws_manager.broadcast(tenant_id, "message_reaction", {
+                        "conversation_id": target.conversation_id,
+                        "message_db_id": target.id,
+                        "emoji": emoji,
+                        "from": "customer",
+                    })
+            continue
+
         # Extract text/caption depending on type
         text_body: str | None = None
         media_type: str | None = None
         media_id: str | None = None
         media_url: str | None = None
+        media_filename: str | None = None
 
         if msg_type == "text":
             text_body = msg_data.get("text", {}).get("body")
@@ -310,24 +488,62 @@ async def handle_whatsapp_message(
             media_type = msg_type
             text_body = msg_data.get(msg_type, {}).get("caption")
             media_id = msg_data.get(msg_type, {}).get("id")
+            media_filename = msg_data.get(msg_type, {}).get("filename")
         elif msg_type == "interactive":
             # Button reply or list reply
             interactive = msg_data.get("interactive", {})
             if interactive.get("type") == "button_reply":
                 text_body = interactive["button_reply"].get("title")
             elif interactive.get("type") == "list_reply":
-                text_body = interactive["list_reply"].get("title")
+                reply = interactive["list_reply"]
+                text_body = reply.get("title")
+                if reply.get("description"):
+                    text_body = f"{text_body} — {reply['description']}"
+        elif msg_type == "button":
+            # Resposta a botão de quick reply de um template
+            text_body = msg_data.get("button", {}).get("text")
+        elif msg_type == "location":
+            loc = msg_data.get("location", {})
+            lat, lng = loc.get("latitude"), loc.get("longitude")
+            place = loc.get("name") or loc.get("address") or "Localização"
+            text_body = f"📍 {place}\nhttps://maps.google.com/?q={lat},{lng}"
+        elif msg_type == "contacts":
+            parts = []
+            for c in msg_data.get("contacts", []):
+                cname = c.get("name", {}).get("formatted_name", "Contato")
+                phones = ", ".join(
+                    p.get("phone", "") for p in c.get("phones", []) if p.get("phone")
+                )
+                parts.append(f"{cname} ({phones})" if phones else cname)
+            text_body = "👤 " + "; ".join(parts)
+        elif msg_type == "order":
+            order = msg_data.get("order", {})
+            items = order.get("product_items", [])
+            text_body = f"🛒 Pedido com {len(items)} item(ns) do catálogo"
+        elif msg_type == "unsupported":
+            text_body = "[mensagem não suportada pelo WhatsApp Business]"
 
-        # Download media from Meta if present
+        # Quote: cliente respondeu citando uma mensagem anterior
+        context_text: str | None = None
+        ctx_wamid = msg_data.get("context", {}).get("id")
+        if ctx_wamid:
+            result = await db.execute(
+                select(Message).where(
+                    Message.message_id == ctx_wamid,
+                    Message.tenant_id == tenant_id,
+                )
+            )
+            quoted = result.scalar_one_or_none()
+            if quoted:
+                context_text = quoted.text or f"[{quoted.media_type or 'mídia'}]"
+
+        # Mídia recebida: salva o caminho do proxy autenticado do backend
+        # (as URLs lookaside da Meta exigem Bearer token — o navegador não exibe).
         if media_id:
-            try:
-                token = decrypt_token(conn.access_token_encrypted)
-                from app.services import whatsapp_service
-                media_url = await whatsapp_service.download_media(token, media_id, return_url_only=True)
-            except Exception as exc:
-                logger.warning("Failed to download media %s: %s", media_id, exc)
+            media_url = f"/whatsapp/media/{media_id}"
 
-        # Upsert lead (wa_id as instagram_handle for now)
+        # Upsert lead — cria automaticamente com nome + número quando vem do WhatsApp
+        normalized_phone = normalize_phone(wa_from) or wa_from
         lead = await _find_lead(tenant_id, wa_from, db)
         if not lead:
             customer_name = contacts.get(wa_from)
@@ -335,17 +551,24 @@ async def handle_whatsapp_message(
                 id=str(uuid.uuid4()),
                 account_id=tenant_id,
                 instagram_handle=wa_from,
-                name=customer_name,
+                phone=normalized_phone,
+                name=customer_name or normalized_phone,
                 source=LeadSource.INSTAGRAM_DM,
                 status=LeadStatus.NEW,
             )
             db.add(lead)
             await db.flush()
+        elif not lead.phone:
+            # Lead já existia (ex: veio do Instagram) — agora temos o número
+            lead.phone = normalized_phone
 
         # Find or create conversation for this wa_id
-        conv = await _get_or_create_wpp_conversation(tenant_id, lead.id, db)
+        conv = await _get_or_create_conversation(tenant_id, lead.id, "whatsapp", db)
 
         # Save message
+        payload_data = dict(msg_data)
+        if media_filename:
+            payload_data["filename"] = media_filename
         msg = Message(
             tenant_id=tenant_id,
             conversation_id=conv.id,
@@ -357,7 +580,8 @@ async def handle_whatsapp_message(
             message_id=wamid,
             media_type=media_type,
             media_url=media_url,
-            payload=msg_data,
+            context_text=context_text,
+            payload=payload_data,
             is_within_24h_window=True,
             created_at=datetime.fromtimestamp(timestamp, tz=timezone.utc) if timestamp else datetime.now(timezone.utc),
         )
@@ -370,15 +594,9 @@ async def handle_whatsapp_message(
         await db.flush()
         await db.refresh(msg)
 
-        # Mark as read at Meta (best-effort)
-        try:
-            token = decrypt_token(conn.access_token_encrypted)
-            from app.services import whatsapp_service
-            await whatsapp_service.mark_as_read(token, conn.phone_number_id, wamid)
-        except Exception as exc:
-            logger.debug("mark_as_read failed: %s", exc)
-
         # Broadcast to connected frontend clients
+        # (confirmação de leitura é enviada quando o agente abre a conversa,
+        #  ou logo abaixo quando o bot responde — não no recebimento)
         await ws_manager.broadcast(tenant_id, "new_message", {
             "id": msg.id,
             "conversation_id": conv.id,
@@ -387,6 +605,8 @@ async def handle_whatsapp_message(
             "text": text_body,
             "media_type": media_type,
             "media_url": media_url,
+            "context_text": context_text,
+            "payload": {"filename": media_filename} if media_filename else None,
             "direction": "inbound",
             "status": "delivered",
             "message_id": wamid,
@@ -399,14 +619,20 @@ async def handle_whatsapp_message(
             "last_updated": conv.last_updated.isoformat(),
         })
 
-        # Auto-reply por keyword para WhatsApp (se configurado)
-        if text_body:
+        # Auto-reply por keyword para WhatsApp (se configurado e bot ativo na conversa)
+        if text_body and conv.bot_active:
             matched = await _match_automation(tenant_id, text_body, db)
             if matched:
                 try:
                     token = decrypt_token(conn.access_token_encrypted)
                     from app.services import whatsapp_service
-                    await whatsapp_service.send_text(token, conn.phone_number_id, wa_from, matched.auto_reply_message)
+                    # Bot vai responder: marca a mensagem como lida (ticks azuis)
+                    try:
+                        await whatsapp_service.mark_as_read(token, conn.phone_number_id, wamid)
+                    except Exception:
+                        pass
+                    resp = await whatsapp_service.send_text(token, conn.phone_number_id, wa_from, matched.auto_reply_message)
+                    bot_wamid = (resp.get("messages") or [{}])[0].get("id")
                     # Salva resposta do bot
                     bot_msg = Message(
                         tenant_id=tenant_id,
@@ -416,6 +642,7 @@ async def handle_whatsapp_message(
                         direction="outbound",
                         wa_id=wa_from,
                         status="sent",
+                        message_id=bot_wamid,
                         is_within_24h_window=True,
                     )
                     db.add(bot_msg)
@@ -484,14 +711,15 @@ async def _resolve_wpp_tenant(
     return conn, acc_result.scalar_one_or_none()
 
 
-async def _get_or_create_wpp_conversation(
-    tenant_id: str, customer_id: str, db: AsyncSession
+async def _get_or_create_conversation(
+    tenant_id: str, customer_id: str, channel: str, db: AsyncSession
 ) -> Conversation:
-    """Return existing open conversation for this customer or create a new one."""
+    """Return existing open conversation for this customer+channel or create a new one."""
     result = await db.execute(
         select(Conversation).where(
             Conversation.tenant_id == tenant_id,
             Conversation.customer_id == customer_id,
+            Conversation.channel == channel,
             Conversation.status == "active",
         ).order_by(Conversation.last_updated.desc()).limit(1)
     )
@@ -502,6 +730,7 @@ async def _get_or_create_wpp_conversation(
         id=str(uuid.uuid4()),
         tenant_id=tenant_id,
         customer_id=customer_id,
+        channel=channel,
         atendimento_status="aberto",
         status="active",
         unread_count=0,
@@ -512,13 +741,25 @@ async def _get_or_create_wpp_conversation(
 
 
 async def _resolve_tenant_by_page_id(page_id: str, db: AsyncSession) -> Account | None:
+    """
+    Resolve o tenant a partir do entry.id do webhook. Esse ID varia conforme
+    o fluxo de conexão: Facebook Login for Business manda o Page ID
+    (MetaConnection.page_id); Instagram Login (fluxo ativo hoje) manda o
+    ID da conta Instagram (MetaConnection.ig_business_account_id) — por
+    isso checamos as duas colunas.
+    """
     result = await db.execute(select(Account).where(Account.meta_page_id == page_id))
     account = result.scalar_one_or_none()
     if account:
         return account
 
     conn_result = await db.execute(
-        select(MetaConnection).where(MetaConnection.page_id == page_id)
+        select(MetaConnection).where(
+            or_(
+                MetaConnection.page_id == page_id,
+                MetaConnection.ig_business_account_id == page_id,
+            )
+        )
     )
     connection = conn_result.scalar_one_or_none()
     if connection:

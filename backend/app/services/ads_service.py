@@ -1,10 +1,11 @@
 """
-Meta Ads (Marketing API) service — minimum viable implementation.
+Meta Ads (Marketing API) service.
 
 act_ prefix handling: Meta ad account IDs come back either as "act_123" or plain
 "123" depending on the endpoint.  _act() normalises them.
 """
 import asyncio
+import json
 import logging
 
 import httpx
@@ -35,6 +36,24 @@ async def _request(method: str, url: str, **kwargs) -> dict:
         await asyncio.sleep(wait)
 
     return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Ad Accounts
+# ---------------------------------------------------------------------------
+
+async def list_ad_accounts(token: str) -> list[dict]:
+    """List all ad accounts the token's user has access to."""
+    data = await _request(
+        "GET",
+        f"{settings.meta_graph_url}/me/adaccounts",
+        params={
+            "access_token": token,
+            "fields": "id,name,account_status,currency,amount_spent,business_name",
+            "limit": "100",
+        },
+    )
+    return data.get("data", [])
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +102,24 @@ async def create_campaign(
     )
 
 
+async def update_campaign(token: str, campaign_id: str, **fields) -> dict:
+    """Update a campaign (status, name, daily_budget, lifetime_budget, ...)."""
+    return await _request(
+        "POST",
+        f"{settings.meta_graph_url}/{campaign_id}",
+        params={"access_token": token},
+        json=fields,
+    )
+
+
+async def delete_campaign(token: str, campaign_id: str) -> dict:
+    return await _request(
+        "DELETE",
+        f"{settings.meta_graph_url}/{campaign_id}",
+        params={"access_token": token},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ad Sets
 # ---------------------------------------------------------------------------
@@ -96,15 +133,16 @@ async def create_ad_set(
     billing_event: str = "IMPRESSIONS",
     optimization_goal: str = "REACH",
     targeting: dict | None = None,
+    bid_amount: int | None = None,
+    end_time: str | None = None,
 ) -> dict:
     """
     Create an ad set inside a campaign.
 
-    daily_budget is in account currency minor units (e.g. centavos for BRL).
-
-    TODO: add bid_amount, end_time, attribution_spec, promoted_object support.
+    daily_budget/bid_amount are in account currency minor units (e.g. centavos for BRL).
+    end_time is an ISO-8601 string; omit for an ad set that runs indefinitely.
     """
-    payload = {
+    payload: dict = {
         "name": name,
         "campaign_id": campaign_id,
         "daily_budget": str(daily_budget),
@@ -113,12 +151,70 @@ async def create_ad_set(
         "targeting": targeting or {"geo_locations": {"countries": ["BR"]}},
         "status": "PAUSED",
     }
+    if bid_amount:
+        payload["bid_amount"] = str(bid_amount)
+    if end_time:
+        payload["end_time"] = end_time
     return await _request(
         "POST",
         f"{settings.meta_graph_url}/{_act(ad_account_id)}/adsets",
         params={"access_token": token},
         json=payload,
     )
+
+
+async def list_ad_sets(token: str, campaign_id: str) -> list[dict]:
+    """List ad sets belonging to a campaign."""
+    data = await _request(
+        "GET",
+        f"{settings.meta_graph_url}/{campaign_id}/adsets",
+        params={
+            "access_token": token,
+            "fields": "id,name,status,daily_budget,lifetime_budget,bid_amount,"
+                      "billing_event,optimization_goal,targeting,end_time",
+            "limit": "50",
+        },
+    )
+    return data.get("data", [])
+
+
+async def update_ad_set(token: str, ad_set_id: str, **fields) -> dict:
+    """Update an ad set (status, daily_budget, bid_amount, targeting, ...)."""
+    return await _request(
+        "POST",
+        f"{settings.meta_graph_url}/{ad_set_id}",
+        params={"access_token": token},
+        json=fields,
+    )
+
+
+async def delete_ad_set(token: str, ad_set_id: str) -> dict:
+    return await _request(
+        "DELETE",
+        f"{settings.meta_graph_url}/{ad_set_id}",
+        params={"access_token": token},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Video upload (obrigatório para criativos de vídeo — a Marketing API não
+# aceita uma video_url pública direta como aceita para imagens).
+# ---------------------------------------------------------------------------
+
+async def upload_ad_video(
+    token: str, ad_account_id: str, content: bytes, filename: str,
+) -> dict:
+    """Sobe um vídeo para a conta de anúncios. Retorna {"id": "<video_id>"}."""
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            f"{settings.meta_graph_url}/{_act(ad_account_id)}/advideos",
+            params={"access_token": token},
+            files={"source": (filename, content, "video/mp4")},
+        )
+    data = resp.json()
+    if resp.status_code >= 400:
+        logger.warning("Falha no upload de vídeo de anúncio: %s", data)
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -133,16 +229,43 @@ async def create_ad_creative(
     message: str,
     image_url: str | None = None,
     link_url: str | None = None,
+    video_id: str | None = None,
+    video_thumb_url: str | None = None,
+    carousel_items: list[dict] | None = None,
 ) -> dict:
-    """Create an ad creative (image + copy).  TODO: video, carousel support."""
-    object_story_spec: dict = {
-        "page_id": page_id,
-        "link_data": {
+    """
+    Create an ad creative — imagem única, vídeo (via video_id já enviado por
+    upload_ad_video) ou carrossel (2-10 itens: image_url + link_url + message).
+    """
+    object_story_spec: dict = {"page_id": page_id}
+
+    if carousel_items:
+        object_story_spec["link_data"] = {
+            "message": message,
+            "link": link_url or "",
+            "child_attachments": [
+                {
+                    "link": item.get("link_url") or link_url or "",
+                    "picture": item.get("image_url"),
+                    "name": item.get("message", ""),
+                }
+                for item in carousel_items
+            ],
+        }
+    elif video_id:
+        object_story_spec["video_data"] = {
+            "video_id": video_id,
+            "message": message,
+            **({"image_url": video_thumb_url} if video_thumb_url else {}),
+            **({"call_to_action": {"type": "LEARN_MORE", "value": {"link": link_url}}} if link_url else {}),
+        }
+    else:
+        object_story_spec["link_data"] = {
             "message": message,
             **({"link": link_url} if link_url else {}),
             **({"picture": image_url} if image_url else {}),
-        },
-    }
+        }
+
     return await _request(
         "POST",
         f"{settings.meta_graph_url}/{_act(ad_account_id)}/adcreatives",
@@ -173,25 +296,114 @@ async def create_ad(
     )
 
 
+async def list_ads(token: str, ad_set_id: str) -> list[dict]:
+    """List ads belonging to an ad set."""
+    data = await _request(
+        "GET",
+        f"{settings.meta_graph_url}/{ad_set_id}/ads",
+        params={
+            "access_token": token,
+            "fields": "id,name,status,creative{id,name,thumbnail_url,object_story_spec}",
+            "limit": "50",
+        },
+    )
+    return data.get("data", [])
+
+
+async def update_ad(token: str, ad_id: str, **fields) -> dict:
+    """Update an ad (status, name, ...)."""
+    return await _request(
+        "POST",
+        f"{settings.meta_graph_url}/{ad_id}",
+        params={"access_token": token},
+        json=fields,
+    )
+
+
+async def delete_ad(token: str, ad_id: str) -> dict:
+    return await _request(
+        "DELETE",
+        f"{settings.meta_graph_url}/{ad_id}",
+        params={"access_token": token},
+    )
+
+
 # ---------------------------------------------------------------------------
-# Insights
+# Targeting search (autocomplete de interesses e localizações)
 # ---------------------------------------------------------------------------
+
+async def search_interests(token: str, query: str, limit: int = 10) -> list[dict]:
+    data = await _request(
+        "GET",
+        f"{settings.meta_graph_url}/search",
+        params={
+            "access_token": token,
+            "type": "adinterest",
+            "q": query,
+            "limit": str(limit),
+        },
+    )
+    return data.get("data", [])
+
+
+async def search_geo_locations(token: str, query: str, limit: int = 10) -> list[dict]:
+    data = await _request(
+        "GET",
+        f"{settings.meta_graph_url}/search",
+        params={
+            "access_token": token,
+            "type": "adgeolocation",
+            "q": query,
+            "location_types": json.dumps(["country", "region", "city"]),
+            "limit": str(limit),
+        },
+    )
+    return data.get("data", [])
+
+
+# ---------------------------------------------------------------------------
+# Insights — funciona para qualquer nó (conta, campanha, ad set ou anúncio)
+# ---------------------------------------------------------------------------
+
+async def get_insights(
+    token: str,
+    node_id: str,
+    date_preset: str = "last_30d",
+    since: str | None = None,
+    until: str | None = None,
+    time_increment: int | str | None = None,
+    fields: str = "spend,impressions,clicks,ctr,cpm,actions",
+) -> list[dict]:
+    """
+    Busca insights de qualquer nó da Marketing API (conta, campanha, ad set
+    ou anúncio — todos expõem a edge /insights com o mesmo formato).
+
+    since/until (YYYY-MM-DD) têm prioridade sobre date_preset quando informados.
+    time_increment=1 retorna uma linha por dia (para gráficos de série temporal).
+    """
+    params: dict = {"access_token": token, "fields": fields}
+    if since and until:
+        params["time_range"] = json.dumps({"since": since, "until": until})
+    else:
+        params["date_preset"] = date_preset
+    if time_increment:
+        params["time_increment"] = str(time_increment)
+
+    data = await _request(
+        "GET", f"{settings.meta_graph_url}/{node_id}/insights", params=params,
+    )
+    return data.get("data", [])
+
 
 async def get_account_insights(
     token: str,
     ad_account_id: str,
     date_preset: str = "last_30d",
+    since: str | None = None,
+    until: str | None = None,
     fields: str = "spend,impressions,clicks,ctr,cpm,actions",
 ) -> list[dict]:
-    """Fetch account-level insights."""
-    data = await _request(
-        "GET",
-        f"{settings.meta_graph_url}/{_act(ad_account_id)}/insights",
-        params={
-            "access_token": token,
-            "level": "account",
-            "fields": fields,
-            "date_preset": date_preset,
-        },
+    """Fetch account-level insights (level=account is implicit on the act_ node)."""
+    return await get_insights(
+        token, _act(ad_account_id), date_preset=date_preset, since=since, until=until, fields=fields,
     )
-    return data.get("data", [])

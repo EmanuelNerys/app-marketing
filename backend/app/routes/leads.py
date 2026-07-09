@@ -1,15 +1,18 @@
+import csv
+import io
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.phone import normalize_phone
 from app.models.user import User
-from app.models.lead import Lead
+from app.models.lead import Lead, LeadSource, LeadStatus
 from app.schemas import LeadResponse, LeadUpdate
 from app.services.lead_scoring import score_lead
 
@@ -20,6 +23,83 @@ router = APIRouter(prefix="/leads", tags=["leads"])
 class DMSendRequest(BaseModel):
     lead_id: str
     message: str
+
+
+_NAME_COLS = {"nome", "name", "cliente", "contato", "nome completo"}
+_PHONE_COLS = {"telefone", "phone", "celular", "whatsapp", "numero", "número", "fone", "tel"}
+
+
+@router.post("/import")
+async def import_leads_csv(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Importa leads em massa de um CSV com colunas de nome e telefone.
+    Telefones são padronizados para 55DDDNUMERO; duplicados/ inválidos são pulados.
+    """
+    if current_user.role != "admin":
+        raise HTTPException(403, "Apenas admins podem importar leads.")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    # Detecta o delimitador (vírgula ou ponto-e-vírgula)
+    sample = text[:2000]
+    delimiter = ";" if sample.count(";") > sample.count(",") else ","
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+
+    def find_col(fieldnames, options: set[str]) -> str | None:
+        for f in fieldnames or []:
+            if f and f.strip().lower() in options:
+                return f
+        return None
+
+    name_col = find_col(reader.fieldnames, _NAME_COLS)
+    phone_col = find_col(reader.fieldnames, _PHONE_COLS)
+    if not phone_col:
+        raise HTTPException(
+            400,
+            "O CSV precisa de uma coluna de telefone (ex.: cabeçalho 'nome,telefone').",
+        )
+
+    # Telefones já existentes (para não duplicar)
+    existing = await db.execute(
+        select(Lead.phone).where(
+            Lead.account_id == current_user.tenant_id, Lead.phone.isnot(None)
+        )
+    )
+    seen = {row[0] for row in existing.all()}
+
+    created = skipped = invalid = 0
+    for row in reader:
+        phone = normalize_phone((row.get(phone_col) or "").strip())
+        if not phone:
+            invalid += 1
+            continue
+        if phone in seen:
+            skipped += 1
+            continue
+        name = (row.get(name_col) or "").strip() if name_col else ""
+        db.add(Lead(
+            account_id=current_user.tenant_id,
+            name=name or phone,
+            instagram_handle=phone,
+            phone=phone,
+            source=LeadSource.MANUAL,
+            status=LeadStatus.NEW,
+        ))
+        seen.add(phone)
+        created += 1
+
+    await db.flush()
+    logger.info("Import CSV: tenant=%s created=%d skipped=%d invalid=%d",
+                current_user.tenant_id, created, skipped, invalid)
+    return {"created": created, "skipped": skipped, "invalid": invalid}
 
 
 @router.get("", response_model=List[LeadResponse])

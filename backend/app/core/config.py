@@ -16,10 +16,16 @@ class Settings(BaseSettings):
     meta_redirect_uri: str = "http://localhost:8000/api/v1/auth/meta/callback"
     meta_webhook_verify_token: str = ""
 
+    # WhatsApp Embedded Signup — Configuration ID from
+    # Meta App Dashboard > WhatsApp > Embedded Signup > Configurations
+    whatsapp_config_id: str = ""
+
     # Instagram App (Basic Display / Instagram Login)
     ig_app_id: str = ""
     ig_app_secret: str = ""
     ig_redirect_uri: str = "http://localhost:8000/api/v1/auth/instagram/callback"
+    # Token de usuário gerado manualmente no painel — apenas para seed/testes locais
+    ig_test_access_token: str = ""
 
     # Fernet key for encrypting access tokens at rest.
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

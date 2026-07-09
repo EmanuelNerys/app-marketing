@@ -32,7 +32,9 @@ IG_GRAPH_URL = "https://graph.instagram.com/v21.0"
 IG_SCOPES = (
     "instagram_business_basic,"
     "instagram_business_manage_messages,"
-    "instagram_business_manage_comments"
+    "instagram_business_manage_comments,"
+    "instagram_business_content_publish,"
+    "instagram_business_manage_insights"
 )
 
 
@@ -182,7 +184,20 @@ async def instagram_callback(
     await db.flush()
     await db.refresh(account)
 
-    frontend_url = "http://localhost:5173"
+    # Inscreve a conta nos webhooks do app (comentários + mensagens).
+    # A Meta não faz isso automaticamente mesmo com o Instagram Login —
+    # sem essa chamada, nada chega no endpoint /webhook/meta.
+    try:
+        from app.services.instagram_service import subscribe_webhooks
+        sub_result = await subscribe_webhooks(access_token, ig_biz_id)
+        if sub_result.get("error"):
+            logger.warning("Falha ao inscrever webhooks IG %s: %s", ig_biz_id, sub_result)
+        else:
+            logger.info("Webhooks IG inscritos para %s: %s", ig_biz_id, sub_result)
+    except Exception as exc:
+        logger.warning("Erro ao inscrever webhooks IG %s: %s", ig_biz_id, exc)
+
+    frontend_url = settings.app_url
     return RedirectResponse(
         url=f"{frontend_url}/oauth/success?provider=instagram&username={ig_username or ''}",
         status_code=302,

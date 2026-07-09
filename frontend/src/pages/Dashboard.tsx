@@ -120,12 +120,19 @@ const emptyData: DashboardData = {
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData>(emptyData)
   const [period, setPeriod] = useState('30d')
+  const [waCosts, setWaCosts] = useState<{
+    total: number
+    breakdown: Record<string, { count: number; unit_cost: number; subtotal: number }>
+  } | null>(null)
 
   useEffect(() => {
     const accountId = localStorage.getItem('account_id') ?? ''
     api.get('/dashboard', { params: { account_id: accountId } })
       .then((res) => setData(res.data))
       .catch(() => {})
+    api.get('/whatsapp/costs')
+      .then((res) => setWaCosts(res.data))
+      .catch(() => setWaCosts(null))
   }, [])
 
   const creditsRemaining = data.credits_total - data.credits_used
@@ -178,6 +185,18 @@ export default function Dashboard() {
         <MetricCard icon="donut" iconColor="indigo" value={`${creditsPercent}%`} label="Créditos Usados" sub={`${data.credits_used} / ${data.credits_total}`} />
         <MetricCard icon="play" iconColor="teal" value={data.last_video_title || 'Nenhum'} label="Último Vídeo" sub={data.last_video_created_at ? new Date(data.last_video_created_at).toLocaleDateString('pt-BR') : ''} />
       </CardsGrid>
+
+      {waCosts && (
+        <>
+          <SectionLabel>WhatsApp — Custo do mês</SectionLabel>
+          <CardsGrid minWidth={140}>
+            <MetricCard icon="coins" iconColor="green" value={`R$ ${waCosts.total.toFixed(2)}`} label="Custo total (mês)" />
+            <MetricCard icon="receipt" iconColor="blue" value={`R$ ${(waCosts.breakdown.utility?.subtotal ?? 0).toFixed(2)}`} label="Utilidade" sub={`${waCosts.breakdown.utility?.count ?? 0} conversas`} />
+            <MetricCard icon="receipt" iconColor="purple" value={`R$ ${(waCosts.breakdown.marketing?.subtotal ?? 0).toFixed(2)}`} label="Marketing" sub={`${waCosts.breakdown.marketing?.count ?? 0} conversas`} />
+            <MetricCard icon="receipt" iconColor="orange" value={`R$ ${(waCosts.breakdown.authentication?.subtotal ?? 0).toFixed(2)}`} label="Autenticação" sub={`${waCosts.breakdown.authentication?.count ?? 0} conversas`} />
+          </CardsGrid>
+        </>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>

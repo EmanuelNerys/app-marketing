@@ -12,6 +12,7 @@ from app.core.security import get_current_user, hash_password
 from app.models.account import Account
 from app.models.user import User
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionPlan
+from app.models.client_assignment import ClientAssignment
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth/clients", tags=["clients"])
@@ -152,12 +153,21 @@ async def list_clients(
     current_user: User = Depends(get_current_user),
     _plan: str = Depends(_require_agency_plan),
 ):
-    """List all sub-accounts (clients) managed by the agency."""
-    result = await db.execute(
-        select(Account).where(
-            Account.parent_account_id == current_user.tenant_id
-        ).order_by(Account.created_at.desc())
-    )
+    """List all sub-accounts (clients) managed by the agency.
+
+    Admins veem todas; membros não-admin só veem as empresas atribuídas.
+    """
+    q = select(Account).where(
+        Account.parent_account_id == current_user.tenant_id
+    ).order_by(Account.created_at.desc())
+
+    if current_user.role != "admin":
+        assigned = select(ClientAssignment.client_account_id).where(
+            ClientAssignment.user_id == current_user.id
+        )
+        q = q.where(Account.id.in_(assigned))
+
+    result = await db.execute(q)
     accounts = result.scalars().all()
 
     clients_out = []
@@ -205,6 +215,20 @@ async def impersonate_client(
     if not client_account:
         raise HTTPException(status_code=404, detail="Cliente não encontrado.")
 
+    # Acesso restrito: membro não-admin só acessa empresas atribuídas a ele
+    if current_user.role != "admin":
+        assigned = await db.execute(
+            select(ClientAssignment).where(
+                ClientAssignment.user_id == current_user.id,
+                ClientAssignment.client_account_id == client_id,
+            )
+        )
+        if not assigned.scalar_one_or_none():
+            raise HTTPException(
+                status_code=403,
+                detail="Você não tem acesso a esta empresa. Peça ao admin para atribuí-la a você.",
+            )
+
     result = await db.execute(
         select(User).where(
             User.tenant_id == client_account.id, User.role == "admin"
@@ -250,3 +274,82 @@ async def delete_client(
     client_account.is_active = False
     await db.commit()
     logger.info("Agency %s deactivated client %s", current_user.tenant_id, client_id)
+
+
+# ---------------------------------------------------------------------------
+# Atribuições — quais empresas cada membro da agência pode acessar
+# ---------------------------------------------------------------------------
+
+class AssignmentsUpdateRequest(BaseModel):
+    client_ids: list[str] = Field(default_factory=list)
+
+
+async def _get_member_or_404(user_id: str, tenant_id: str, db: AsyncSession) -> User:
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+    )
+    member = result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=404, detail="Membro não encontrado neste tenant.")
+    return member
+
+
+@router.get("/assignments/{user_id}")
+async def list_assignments(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _plan: str = Depends(_require_agency_plan),
+):
+    """Empresas atribuídas a um membro da agência (admin only)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas admins podem ver atribuições.")
+    await _get_member_or_404(user_id, current_user.tenant_id, db)
+
+    result = await db.execute(
+        select(ClientAssignment.client_account_id).where(ClientAssignment.user_id == user_id)
+    )
+    return {"user_id": user_id, "client_ids": [row[0] for row in result.all()]}
+
+
+@router.put("/assignments/{user_id}")
+async def update_assignments(
+    user_id: str,
+    body: AssignmentsUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _plan: str = Depends(_require_agency_plan),
+):
+    """Substitui as empresas atribuídas a um membro (admin only)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas admins podem atribuir empresas.")
+    await _get_member_or_404(user_id, current_user.tenant_id, db)
+
+    # Valida que todos os ids são empresas desta agência
+    if body.client_ids:
+        result = await db.execute(
+            select(Account.id).where(
+                Account.parent_account_id == current_user.tenant_id,
+                Account.id.in_(body.client_ids),
+            )
+        )
+        valid_ids = {row[0] for row in result.all()}
+        invalid = set(body.client_ids) - valid_ids
+        if invalid:
+            raise HTTPException(status_code=400, detail=f"Empresas inválidas: {', '.join(invalid)}")
+
+    # Substitui tudo (delete + insert)
+    existing = await db.execute(
+        select(ClientAssignment).where(ClientAssignment.user_id == user_id)
+    )
+    for a in existing.scalars().all():
+        await db.delete(a)
+    await db.flush()
+
+    for cid in set(body.client_ids):
+        db.add(ClientAssignment(user_id=user_id, client_account_id=cid))
+    await db.commit()
+
+    logger.info("Admin %s set %d assignments for member %s",
+                current_user.id, len(set(body.client_ids)), user_id)
+    return {"user_id": user_id, "client_ids": list(set(body.client_ids))}
