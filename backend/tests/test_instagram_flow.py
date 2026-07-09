@@ -29,6 +29,17 @@ from app.services.meta_token_service import encrypt_token
 APP_SECRET = "test_app_secret"
 
 
+@pytest.fixture(autouse=True)
+def _mock_ig_profile():
+    """Evita chamada de rede real ao buscar o perfil do remetente na Graph API."""
+    with patch(
+        "app.services.instagram_service.get_user_profile",
+        new_callable=AsyncMock,
+        return_value={"name": "Cliente IG", "username": "cliente_ig", "profile_pic": None},
+    ):
+        yield
+
+
 def _make_signature(body: bytes) -> str:
     sig = hmac.new(APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
     return f"sha256={sig}"
@@ -49,7 +60,7 @@ async def _signed_post(client, payload: dict):
 def _ig_messaging_payload(ig_business_id: str, messaging_value: dict) -> dict:
     return {
         "object": "instagram",
-        "entry": [{"id": ig_business_id, "changes": [{"field": "messaging", "value": messaging_value}]}],
+        "entry": [{"id": ig_business_id, "messaging": [messaging_value]}],
     }
 
 

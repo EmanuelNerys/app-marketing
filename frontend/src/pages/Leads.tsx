@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Users, Search, Flame, Thermometer, Snowflake,
   MessageCircle, RefreshCw, Trash2, ChevronDown, X, Send,
-  TrendingUp,
+  TrendingUp, GitMerge,
 } from 'lucide-react'
 import api from '../services/api'
 
@@ -93,6 +93,12 @@ export default function Leads() {
   // Status dropdown
   const [editingStatus, setEditingStatus] = useState<string | null>(null)
 
+  // Merge modal — lead sobrevivente + busca do lead a absorver
+  const [mergeSurvivor, setMergeSurvivor] = useState<Lead | null>(null)
+  const [mergeSearch, setMergeSearch] = useState('')
+  const [merging, setMerging] = useState(false)
+  const [mergeError, setMergeError] = useState('')
+
   useEffect(() => { loadLeads() }, [filterStatus, filterScore])
 
   async function loadLeads() {
@@ -134,6 +140,22 @@ export default function Leads() {
       await api.delete(`/leads/${leadId}`)
       setLeads((prev) => prev.filter((l) => l.id !== leadId))
     } catch { /* ignore */ }
+  }
+
+  async function handleMerge(absorbedId: string) {
+    if (!mergeSurvivor) return
+    setMerging(true)
+    setMergeError('')
+    try {
+      await api.post(`/leads/${mergeSurvivor.id}/merge`, { absorbed_lead_id: absorbedId })
+      setMergeSurvivor(null)
+      setMergeSearch('')
+      await loadLeads()
+    } catch (err: any) {
+      setMergeError(err.response?.data?.detail || 'Erro ao mesclar leads.')
+    } finally {
+      setMerging(false)
+    }
   }
 
   async function handleSendDM(e: React.SyntheticEvent) {
@@ -451,6 +473,17 @@ export default function Leads() {
                         <MessageCircle size={13} />
                       </button>
                       <button
+                        onClick={() => {
+                          setMergeSurvivor(lead)
+                          setMergeSearch('')
+                          setMergeError('')
+                        }}
+                        title="Mesclar com outro lead (mesma pessoa em outro canal)"
+                        className="p-1.5 rounded-lg bg-white/[0.04] text-[#8a8a9e] hover:bg-indigo-600/30 hover:text-indigo-300 transition-colors"
+                      >
+                        <GitMerge size={13} />
+                      </button>
+                      <button
                         onClick={() => handleDelete(lead.id)}
                         className="p-1.5 rounded-lg bg-red-900/20 text-red-400 hover:bg-red-900/40 transition-colors"
                       >
@@ -532,6 +565,99 @@ export default function Leads() {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Merge modal */}
+      {mergeSurvivor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-7 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <GitMerge size={16} className="text-indigo-400" />
+                  Mesclar leads
+                </h3>
+                <p className="text-xs text-[#555] mt-0.5">
+                  Escolha o lead que é a mesma pessoa. Ele será fundido em{' '}
+                  <span className="text-[#c0c0d0] font-medium">
+                    {mergeSurvivor.name || mergeSurvivor.instagram_handle}
+                  </span>{' '}
+                  e removido.
+                </p>
+              </div>
+              <button onClick={() => setMergeSurvivor(null)} className="text-[#444] hover:text-[#888] transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="bg-indigo-900/15 border border-indigo-500/20 rounded-lg px-3 py-2 mb-3">
+              <p className="text-[11px] text-indigo-300/90">
+                Manter (sobrevivente): <strong>{mergeSurvivor.name || mergeSurvivor.instagram_handle}</strong>
+                {mergeSurvivor.phone && ` · ${mergeSurvivor.phone}`}
+                {' · '}{sourceLabel[mergeSurvivor.source] ?? mergeSurvivor.source}
+              </p>
+            </div>
+
+            {mergeError && (
+              <div className="bg-red-900/20 border border-red-500/20 text-red-400 text-xs rounded-lg px-4 py-2.5 mb-3">
+                {mergeError}
+              </div>
+            )}
+
+            <div className="relative mb-2">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#444]" />
+              <input
+                autoFocus
+                value={mergeSearch}
+                onChange={(e) => setMergeSearch(e.target.value)}
+                placeholder="Buscar o lead a mesclar (nome, @handle, telefone)…"
+                className="w-full pl-9 pr-4 py-2.5 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:outline-none focus:border-indigo-500/50 placeholder-[#333]"
+              />
+            </div>
+
+            <div className="max-h-64 overflow-y-auto border border-white/[0.06] rounded-lg divide-y divide-white/[0.04]">
+              {leads
+                .filter((l) => l.id !== mergeSurvivor.id)
+                .filter((l) => {
+                  if (!mergeSearch.trim()) return true
+                  const s = mergeSearch.toLowerCase()
+                  return (
+                    (l.name || '').toLowerCase().includes(s) ||
+                    l.instagram_handle.toLowerCase().includes(s) ||
+                    (l.phone || '').toLowerCase().includes(s)
+                  )
+                })
+                .slice(0, 30)
+                .map((l) => (
+                  <button
+                    key={l.id}
+                    onClick={() => handleMerge(l.id)}
+                    disabled={merging}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/[0.03] disabled:opacity-50 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center text-xs font-semibold text-[#8a8a9e] shrink-0">
+                      {(l.name || l.instagram_handle).charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] text-[#d0d0e0] font-medium truncate">
+                        {l.name || l.instagram_handle}
+                      </p>
+                      <p className="text-[11px] text-[#555] truncate">
+                        {l.phone ? l.phone : `@${l.instagram_handle}`}
+                        {' · '}{sourceLabel[l.source] ?? l.source}
+                      </p>
+                    </div>
+                    <GitMerge size={13} className="text-[#444] shrink-0" />
+                  </button>
+                ))}
+              {leads.filter((l) => l.id !== mergeSurvivor.id).length === 0 && (
+                <p className="text-center text-[#555] text-xs py-6">Não há outro lead para mesclar.</p>
+              )}
+            </div>
+
+            {merging && <p className="text-[11px] text-[#555] mt-3 text-center">Mesclando…</p>}
           </div>
         </div>
       )}

@@ -121,19 +121,23 @@ async def instagram_callback(
     expires_in = ll_data.get("expires_in", 3600)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
 
-    # Busca dados da conta Instagram
+    # Busca dados da conta Instagram.
+    # user_id = ID da conta profissional (é o que o webhook manda em entry.id);
+    # id = ID app-scoped. Guardamos o user_id como ig_business_account_id para o
+    # roteamento do webhook bater, e o id app-scoped em meta_user_id.
     async with httpx.AsyncClient() as client:
         me_resp = await client.get(
             f"{IG_GRAPH_URL}/me",
             params={
-                "fields": "id,username,name",
+                "fields": "id,user_id,username,name",
                 "access_token": access_token,
             },
         )
     me_data = me_resp.json()
     logger.info("Instagram /me: %s", me_data)
 
-    ig_biz_id = me_data.get("id") or ig_user_id_fallback
+    ig_app_scoped_id = me_data.get("id") or ig_user_id_fallback
+    ig_biz_id = me_data.get("user_id") or ig_app_scoped_id
     ig_username = me_data.get("username")
 
     # Verifica state e acha o tenant
@@ -164,7 +168,7 @@ async def instagram_callback(
 
     if connection:
         connection.access_token_encrypted = encrypted_token
-        connection.meta_user_id = ig_biz_id
+        connection.meta_user_id = ig_app_scoped_id
         connection.ig_business_account_id = ig_biz_id
         connection.scopes = IG_SCOPES
         connection.status = STATUS_ACTIVE
@@ -172,7 +176,7 @@ async def instagram_callback(
         connection = MetaConnection(
             account_id=tenant_account_id,
             provider=PROVIDER_INSTAGRAM,
-            meta_user_id=ig_biz_id,
+            meta_user_id=ig_app_scoped_id,
             ig_business_account_id=ig_biz_id,
             access_token_encrypted=encrypted_token,
             token_type="long_lived",

@@ -17,6 +17,17 @@ from app.models.automation import AutomationConfig
 APP_SECRET = "test_app_secret"
 
 
+@pytest.fixture(autouse=True)
+def _mock_ig_profile():
+    """Perfil fixo do remetente/comentarista — evita chamada de rede na personalização."""
+    with patch(
+        "app.services.instagram_service.get_user_profile",
+        new_callable=AsyncMock,
+        return_value={"name": "Carla Souza", "username": "carla", "profile_pic": None},
+    ):
+        yield
+
+
 def _make_signature(body: bytes, secret: str = APP_SECRET) -> str:
     sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return f"sha256={sig}"
@@ -46,6 +57,17 @@ def test_valid_signature():
 def test_invalid_signature_wrong_secret():
     body = b'{"object":"instagram","entry":[]}'
     assert _verify_signature(body, _make_signature(body, "wrong")) is False
+
+
+def test_valid_signature_from_instagram_app_secret(monkeypatch):
+    """Webhook do Instagram é assinado com IG_APP_SECRET, não META_APP_SECRET."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "ig_app_secret", "ig_secret_xyz")
+    body = b'{"object":"instagram","entry":[]}'
+    # Assinado com o secret do app do Instagram (diferente do principal)
+    assert _verify_signature(body, _make_signature(body, "ig_secret_xyz")) is True
+    # E o secret do app principal continua válido
+    assert _verify_signature(body, _make_signature(body)) is True
 
 
 def test_tampered_body():
@@ -151,7 +173,9 @@ async def test_ig_comment_creates_lead(client, db_session):
     )
     leads = result.scalars().all()
     assert len(leads) == 1
-    assert leads[0].instagram_handle == "joao_silva"
+    # Lead é chaveado pelo IGSID (from.id) para casar com o DM; nome guarda o @
+    assert leads[0].instagram_handle == "USER_123"
+    assert leads[0].name == "joao_silva"
     assert leads[0].source == LeadSource.INSTAGRAM_COMMENT
 
 
@@ -182,7 +206,7 @@ async def test_ig_comment_does_not_duplicate_lead(client, db_session):
         await _signed_post(client, payload)  # segundo comentário da mesma pessoa
 
     result = await db_session.execute(
-        select(Lead).where(Lead.account_id == account.id, Lead.instagram_handle == "maria")
+        select(Lead).where(Lead.account_id == account.id, Lead.instagram_handle == "U1")
     )
     assert len(result.scalars().all()) == 1
 
@@ -274,6 +298,50 @@ async def test_comment_keyword_sends_private_dm(client, db_session):
         mock_dm.assert_called_once()
         assert mock_dm.call_args[0][1] == "C5"
         assert mock_dm.call_args[0][2] == "Aqui está o link que você pediu 😉"
+
+
+@pytest.mark.asyncio
+async def test_comment_dm_personalization_substitutes_name(client, db_session):
+    """{{primeiro_nome}} / {{usuario}} são trocados pelo nome real de quem comentou."""
+    account = Account(
+        brand_name="Perso Test",
+        meta_page_id="PAGE_PERSO",
+        meta_page_name="Página Perso",
+        meta_access_token="fake_token",
+    )
+    db_session.add(account)
+    await db_session.flush()
+
+    config = AutomationConfig(
+        account_id=account.id,
+        keyword="quero",
+        auto_reply_message="Fallback",
+        comment_reply_message="Te chamei no direto, {{primeiro_nome}}! 📩",
+        dm_message="Oi {{nome}} (@{{usuario}})! Aqui está o que você pediu 👇",
+        trigger_type="both",
+        is_active=True,
+    )
+    db_session.add(config)
+    await db_session.flush()
+
+    payload = {
+        "object": "instagram",
+        "entry": [{
+            "id": "PAGE_PERSO",
+            "changes": [{
+                "field": "comments",
+                "value": {"from": {"id": "U9", "username": "carla"}, "id": "C9", "text": "Quero!"},
+            }],
+        }],
+    }
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock) as mock_reply, \
+         patch("app.services.instagram_service.send_private_reply", new_callable=AsyncMock) as mock_dm:
+        await _signed_post(client, payload)
+        # {{primeiro_nome}} → "Carla" (do perfil mockado)
+        assert mock_reply.call_args[0][2] == "Te chamei no direto, Carla! 📩"
+        # {{nome}} → "Carla Souza", {{usuario}} → "carla"
+        assert mock_dm.call_args[0][2] == "Oi Carla Souza (@carla)! Aqui está o que você pediu 👇"
 
 
 @pytest.mark.asyncio

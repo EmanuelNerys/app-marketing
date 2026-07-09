@@ -55,6 +55,15 @@ async def _publish_scheduled_post(schedule: PostSchedule) -> None:
             schedule.media_id_response = result.get("id")
             logger.info("Scheduled post %s published for account %s", schedule.id, schedule.account_id)
 
+            # Ativa a automação de comentário deste post (se definida no agendamento)
+            if schedule.automation_keyword and schedule.media_id_response:
+                from app.services.post_automation import create_post_automation
+                await create_post_automation(
+                    db, schedule.account_id, schedule.media_id_response,
+                    schedule.automation_keyword, schedule.automation_comment_reply,
+                    schedule.automation_dm_message, schedule.automation_link_message,
+                )
+
         except TokenExpiredError as e:
             schedule.status = "failed"
             schedule.error_message = f"Token expirado: {e}"

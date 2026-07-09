@@ -15,6 +15,7 @@ from app.models.user import User
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.schemas import LeadResponse, LeadUpdate
 from app.services.lead_scoring import score_lead
+from app.services.lead_merge import merge_leads, auto_merge_by_phone
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/leads", tags=["leads"])
@@ -23,6 +24,10 @@ router = APIRouter(prefix="/leads", tags=["leads"])
 class DMSendRequest(BaseModel):
     lead_id: str
     message: str
+
+
+class MergeLeadsRequest(BaseModel):
+    absorbed_lead_id: str  # lead que será fundido e removido
 
 
 _NAME_COLS = {"nome", "name", "cliente", "contato", "nome completo"}
@@ -169,13 +174,55 @@ async def update_lead(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    phone_changed = "phone" in updates and updates["phone"] and updates["phone"] != lead.phone
+    for field, value in updates.items():
         setattr(lead, field, value)
+
+    # Preencher o telefone pode revelar que este lead é a mesma pessoa de outro
+    # (ex: lead do Instagram que agora ganhou o número do WhatsApp) — unifica.
+    if phone_changed:
+        await db.flush()
+        lead = await auto_merge_by_phone(lead, db)
 
     await score_lead(lead)
     await db.flush()
     await db.refresh(lead)
     return lead
+
+
+@router.post("/{lead_id}/merge", response_model=LeadResponse)
+async def merge_lead(
+    lead_id: str,
+    body: MergeLeadsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Mescla manualmente dois leads da mesma pessoa em um só. `lead_id` é o
+    sobrevivente; `absorbed_lead_id` é fundido nele e removido. Todo o
+    histórico de conversas do absorvido passa para o sobrevivente.
+    """
+    if lead_id == body.absorbed_lead_id:
+        raise HTTPException(400, "Não é possível mesclar um lead com ele mesmo.")
+
+    result = await db.execute(
+        select(Lead).where(
+            Lead.id.in_([lead_id, body.absorbed_lead_id]),
+            Lead.account_id == current_user.tenant_id,
+        )
+    )
+    leads = {l.id: l for l in result.scalars().all()}
+    survivor = leads.get(lead_id)
+    absorbed = leads.get(body.absorbed_lead_id)
+    if not survivor or not absorbed:
+        raise HTTPException(404, "Um ou ambos os leads não foram encontrados.")
+
+    survivor = await merge_leads(survivor, absorbed, db)
+    await score_lead(survivor)
+    await db.flush()
+    await db.refresh(survivor)
+    return survivor
 
 
 @router.post("/{lead_id}/score", response_model=LeadResponse)

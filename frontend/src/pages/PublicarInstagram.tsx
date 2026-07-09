@@ -39,8 +39,17 @@ export default function PublicarInstagram() {
   const [hashtags, setHashtags] = useState('')
   const [scheduledFor, setScheduledFor] = useState('')
   const [publishing, setPublishing] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadedName, setUploadedName] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+
+  // Automação de comentário deste post
+  const [autoEnabled, setAutoEnabled] = useState(false)
+  const [autoKeyword, setAutoKeyword] = useState('')
+  const [autoCommentReply, setAutoCommentReply] = useState('')
+  const [autoDmMessage, setAutoDmMessage] = useState('')
+  const [autoLinkMessage, setAutoLinkMessage] = useState('')
 
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [mediaList, setMediaList] = useState<MediaItem[]>([])
@@ -69,6 +78,43 @@ export default function PublicarInstagram() {
     } catch {}
   }
 
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setError(''); setSuccess(''); setUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await api.post('/instagram/upload-media', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setMediaUrl(res.data.media_url)
+      setMediaType(res.data.media_type)
+      setUploadedName(file.name)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Erro ao enviar o arquivo.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function automationPayload() {
+    if (!autoEnabled || !autoKeyword.trim()) return {}
+    return {
+      automation_keyword: autoKeyword.trim(),
+      automation_comment_reply: autoCommentReply.trim() || null,
+      automation_dm_message: autoDmMessage.trim() || null,
+      automation_link_message: autoLinkMessage.trim() || null,
+    }
+  }
+
+  function resetForm() {
+    setMediaUrl(''); setCaption(''); setHashtags(''); setUploadedName('')
+    setAutoEnabled(false); setAutoKeyword(''); setAutoCommentReply('')
+    setAutoDmMessage(''); setAutoLinkMessage('')
+  }
+
   async function handlePublish() {
     if (!mediaUrl) { setError('URL da mídia é obrigatória.'); return }
     setError(''); setSuccess(''); setPublishing(true)
@@ -79,9 +125,10 @@ export default function PublicarInstagram() {
         media_type: mediaType,
         caption,
         hashtags,
+        ...automationPayload(),
       })
       setSuccess(`Publicado com sucesso! ID: ${res.data.media_id}`)
-      setMediaUrl(''); setCaption(''); setHashtags('')
+      resetForm()
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Erro ao publicar.')
     } finally { setPublishing(false) }
@@ -99,9 +146,10 @@ export default function PublicarInstagram() {
         caption,
         hashtags,
         scheduled_for: new Date(scheduledFor).toISOString(),
+        ...automationPayload(),
       })
       setSuccess('Agendado com sucesso!')
-      setMediaUrl(''); setCaption(''); setHashtags(''); setScheduledFor('')
+      resetForm(); setScheduledFor('')
       loadSchedules()
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Erro ao agendar.')
@@ -192,10 +240,32 @@ export default function PublicarInstagram() {
             </select>
           </div>
           <div className="mb-4">
-            <label className="block text-[#666] text-xs font-medium mb-1">URL da Mídia</label>
-            <input type="url" value={mediaUrl} onChange={e => setMediaUrl(e.target.value)}
+            <label className="block text-[#666] text-xs font-medium mb-1">Mídia</label>
+            <label className={`flex items-center justify-center gap-2 w-full border border-dashed rounded-lg px-3 py-4 text-sm cursor-pointer transition-colors ${
+              uploading ? 'border-indigo-500/40 text-indigo-300' : 'border-white/[0.12] text-[#888] hover:border-indigo-500/40 hover:text-[#e2e2e8]'
+            }`}>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime"
+                onChange={handleFileUpload}
+                disabled={uploading}
+                className="hidden"
+              />
+              {uploading
+                ? 'Enviando arquivo…'
+                : uploadedName
+                  ? `✓ ${uploadedName} — clique para trocar`
+                  : 'Enviar foto ou vídeo do computador'}
+            </label>
+            {mediaType === 'IMAGE' && mediaUrl && (
+              <img src={mediaUrl} alt="" className="mt-2 max-h-40 rounded-lg object-contain" />
+            )}
+            <p className="text-[#444] text-[11px] mt-2">
+              Ou informe a URL pública de uma mídia já hospedada:
+            </p>
+            <input type="url" value={mediaUrl} onChange={e => { setMediaUrl(e.target.value); setUploadedName('') }}
               placeholder="https://exemplo.com/imagem.jpg"
-              className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
+              className="w-full mt-1 bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
           </div>
           <div className="mb-4">
             <label className="block text-[#666] text-xs font-medium mb-1">Legenda</label>
@@ -209,6 +279,71 @@ export default function PublicarInstagram() {
               placeholder="#marketing #instagram #negocios"
               className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
           </div>
+          {/* Automação de comentário deste post */}
+          <div className="mb-4 border border-white/[0.08] rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setAutoEnabled(!autoEnabled)}
+              className="w-full flex items-center justify-between px-3 py-2.5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors"
+            >
+              <span className="flex items-center gap-2 text-[13px] text-[#e2e2e8]">
+                <span className={`w-8 h-4 rounded-full relative transition-colors ${autoEnabled ? 'bg-indigo-500' : 'bg-white/[0.1]'}`}>
+                  <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${autoEnabled ? 'left-4' : 'left-0.5'}`} />
+                </span>
+                🤖 Automação de comentário neste post
+              </span>
+              <span className="text-[#555] text-xs">{autoEnabled ? 'Ativada' : 'Desativada'}</span>
+            </button>
+
+            {autoEnabled && (
+              <div className="p-3 space-y-3 border-t border-white/[0.06]">
+                <p className="text-[11px] text-[#666]">
+                  Quando alguém comentar a palavra-chave <b>neste post</b>, o bot responde e manda um DM.
+                  Depois do link, a conversa vai automaticamente para um atendente humano.
+                </p>
+
+                <div>
+                  <label className="block text-[#666] text-xs font-medium mb-1">Palavra-chave do comentário</label>
+                  <input type="text" value={autoKeyword} onChange={e => setAutoKeyword(e.target.value)}
+                    placeholder="Ex: QUERO"
+                    className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
+                </div>
+
+                <div>
+                  <label className="block text-[#666] text-xs font-medium mb-1">Resposta pública no comentário (opcional)</label>
+                  <input type="text" value={autoCommentReply} onChange={e => setAutoCommentReply(e.target.value)}
+                    placeholder="Te chamei no direto, {{primeiro_nome}}! 📩"
+                    className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
+                </div>
+
+                <div>
+                  <label className="block text-[#666] text-xs font-medium mb-1">1ª mensagem no direto (o gancho)</label>
+                  <textarea value={autoDmMessage} onChange={e => setAutoDmMessage(e.target.value)} rows={2}
+                    placeholder="Oi {{primeiro_nome}}! Responde SIM aqui que eu te mando o link 👇"
+                    className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333] resize-none" />
+                </div>
+
+                <div>
+                  <label className="block text-[#666] text-xs font-medium mb-1">2ª mensagem com o link (opcional)</label>
+                  <textarea value={autoLinkMessage} onChange={e => setAutoLinkMessage(e.target.value)} rows={2}
+                    placeholder="Perfeito, {{primeiro_nome}}! 🎉 Aqui está: seusite.com.br"
+                    className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333] resize-none" />
+                  <p className="text-[10px] text-[#555] mt-1">
+                    Enviada só depois que a pessoa responder (a Meta não permite link no 1º contato).
+                    {' '}<b>Se deixar vazio</b>, o bot dispara a 1ª mensagem uma vez e passa direto para o atendente.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  <span className="text-[10px] text-[#555]">Variáveis:</span>
+                  {['{{primeiro_nome}}', '{{nome}}', '{{usuario}}'].map(v => (
+                    <code key={v} className="text-[10px] bg-black/30 text-indigo-200 px-1.5 py-0.5 rounded">{v}</code>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="mb-4">
             <label className="block text-[#666] text-xs font-medium mb-1">Agendar para (opcional)</label>
             <input type="datetime-local" value={scheduledFor} onChange={e => setScheduledFor(e.target.value)}

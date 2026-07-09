@@ -88,6 +88,19 @@ async def mark_seen(token: str, recipient_id: str) -> dict:
     )
 
 
+async def get_user_profile(token: str, igsid: str) -> dict:
+    """
+    Busca nome, @username e foto de um usuário a partir do ID dele no Direct
+    (IGSID). O webhook de DM só manda o ID — este é o passo para exibir o nome
+    real em vez do número. Requer a permissão instagram_business_manage_messages.
+    """
+    return await _request(
+        "GET",
+        f"{settings.ig_graph_url}/{igsid}",
+        params={"access_token": token, "fields": "name,username,profile_pic"},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Comments
 # ---------------------------------------------------------------------------
@@ -122,6 +135,41 @@ async def send_private_reply(token: str, comment_id: str, message: str) -> dict:
 # Media publishing (container flow)
 # ---------------------------------------------------------------------------
 
+async def _wait_for_container(token: str, container_id: str, max_tries: int, delay: float) -> None:
+    """
+    Aguarda o container de mídia ficar FINISHED antes de publicar. Publicar
+    cedo demais (container ainda ERROR/IN_PROGRESS) faz a Meta recusar com 400.
+    Levanta ValueError se o processamento falhar.
+    """
+    for _ in range(max_tries):
+        status = await _request(
+            "GET",
+            f"{settings.ig_graph_url}/{container_id}",
+            params={"access_token": token, "fields": "status_code,status"},
+        )
+        code = status.get("status_code")
+        if code == "FINISHED":
+            return
+        if code == "ERROR":
+            raise ValueError(f"Processamento da mídia falhou: {status.get('status') or status}")
+        await asyncio.sleep(delay)
+    # Não ficou pronto no tempo — tenta publicar assim mesmo (a Meta valida)
+
+
+async def _publish_container(token: str, ig_user_id: str, container_id: str) -> dict:
+    """Publica o container e garante que a Meta devolveu um id de mídia."""
+    result = await _request(
+        "POST",
+        f"{settings.ig_graph_url}/{ig_user_id}/media_publish",
+        params={"access_token": token},
+        json={"creation_id": container_id},
+    )
+    if not result.get("id"):
+        err = result.get("error", {})
+        raise ValueError(err.get("message") or f"Falha ao publicar: {result}")
+    return result
+
+
 async def publish_image_post(
     token: str,
     ig_user_id: str,
@@ -129,9 +177,9 @@ async def publish_image_post(
     caption: str = "",
 ) -> dict:
     """
-    Publish a single image post via the two-step container flow:
-    1. Create a media container
-    2. Publish the container
+    Publica uma imagem única pelo fluxo de container em dois passos:
+    1. cria o container; 2. espera ficar FINISHED; 3. publica.
+    Imagens costumam processar em ~1-2s (retry rápido).
     """
     container = await _request(
         "POST",
@@ -141,14 +189,11 @@ async def publish_image_post(
     )
     container_id = container.get("id")
     if not container_id:
-        raise ValueError(f"Failed to create media container: {container}")
+        err = container.get("error", {})
+        raise ValueError(err.get("message") or f"Falha ao criar o container: {container}")
 
-    return await _request(
-        "POST",
-        f"{settings.ig_graph_url}/{ig_user_id}/media_publish",
-        params={"access_token": token},
-        json={"creation_id": container_id},
-    )
+    await _wait_for_container(token, container_id, max_tries=10, delay=2)
+    return await _publish_container(token, ig_user_id, container_id)
 
 
 async def publish_video_post(
@@ -158,8 +203,8 @@ async def publish_video_post(
     caption: str = "",
 ) -> dict:
     """
-    Publish a Reel/video post.  Meta requires polling until the container is FINISHED
-    before publishing — this does a simple retry loop (max 10 × 5 s).
+    Publica um Reel/vídeo. Vídeo demora mais para processar — espera até
+    ~50s (10 × 5s) o container ficar FINISHED antes de publicar.
     """
     container = await _request(
         "POST",
@@ -169,24 +214,11 @@ async def publish_video_post(
     )
     container_id = container.get("id")
     if not container_id:
-        raise ValueError(f"Failed to create video container: {container}")
+        err = container.get("error", {})
+        raise ValueError(err.get("message") or f"Falha ao criar o container de vídeo: {container}")
 
-    for _ in range(10):
-        status = await _request(
-            "GET",
-            f"{settings.ig_graph_url}/{container_id}",
-            params={"access_token": token, "fields": "status_code"},
-        )
-        if status.get("status_code") == "FINISHED":
-            break
-        await asyncio.sleep(5)
-
-    return await _request(
-        "POST",
-        f"{settings.ig_graph_url}/{ig_user_id}/media_publish",
-        params={"access_token": token},
-        json={"creation_id": container_id},
-    )
+    await _wait_for_container(token, container_id, max_tries=10, delay=5)
+    return await _publish_container(token, ig_user_id, container_id)
 
 
 # ---------------------------------------------------------------------------

@@ -160,6 +160,22 @@ export default function Automacao() {
             {editingId ? 'Editar automação' : 'Nova automação'}
           </h3>
 
+          <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-lg px-3 py-2.5">
+            <p className="text-[11px] text-indigo-300/90 font-medium mb-1">
+              💡 Personalize com variáveis nas mensagens:
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {['{{primeiro_nome}}', '{{nome}}', '{{usuario}}'].map((v) => (
+                <code key={v} className="text-[10px] bg-black/30 text-indigo-200 px-1.5 py-0.5 rounded">
+                  {v}
+                </code>
+              ))}
+            </div>
+            <p className="text-[10px] text-[#666] mt-1.5">
+              Ex: "Oi <span className="text-indigo-300">{'{{primeiro_nome}}'}</span>! Vi seu comentário 👇" — o sistema troca pelo nome real de quem comentou.
+            </p>
+          </div>
+
           <div>
             <label className="block text-xs font-medium text-[#666] mb-1">Palavra-chave</label>
             <input

@@ -483,3 +483,4 @@ Quando for para domínio público:
 
 2. Configure webhook no Meta Dashboard com a URL de produção
 3. Submeta o app para App Review com as permissões `whatsapp_business_messaging` e `whatsapp_business_management`
+-"já feito isso do wpp"-Dev

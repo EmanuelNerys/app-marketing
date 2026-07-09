@@ -27,6 +27,11 @@ class AutomationConfig(Base):
     comment_reply_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Private DM sent to the commenter (via IG "private reply" API) when set.
     dm_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Segunda mensagem (com link), enviada só depois que a pessoa responder à
+    # 1ª DM — a Meta não permite link no primeiro contato. NULL = fluxo de 1 passo.
+    link_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ao final do fluxo, desliga o bot da conversa e joga para a fila humana.
+    handoff_to_human: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -22,6 +22,13 @@ class PostSchedule(Base):
     hashtags: Mapped[str | None] = mapped_column(Text, nullable=True)
     thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Automação de comentário definida junto com o post — vira uma AutomationConfig
+    # escopada ao media_id quando o post é publicado.
+    automation_keyword: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    automation_comment_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    automation_dm_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    automation_link_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="scheduled")

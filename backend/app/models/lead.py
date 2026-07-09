@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Text, DateTime, Enum as SAEnum, ForeignKey, Integer
+from sqlalchemy import String, Text, DateTime, Enum as SAEnum, ForeignKey, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -40,6 +40,16 @@ class Lead(Base):
     ig_user_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     email: Mapped[str] = mapped_column(String(255), nullable=True)
     phone: Mapped[str] = mapped_column(String(50), nullable=True)
+    # IDs externos de outros leads mesclados neste (ex: PSID do Instagram +
+    # número do WhatsApp da mesma pessoa). Formato: ",id1,id2," — envolto em
+    # vírgulas para casar com LIKE '%,id,%'. Permite que mensagens futuras
+    # encontrem o lead unificado por qualquer um dos canais.
+    alt_handles: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Fluxo comentário→DM: mensagem (com link) a enviar quando a pessoa
+    # responder à 1ª DM. Consumida e limpa no próximo DM recebido.
+    pending_auto_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Passar para atendente humano no próximo DM recebido (fim do fluxo do bot).
+    pending_handoff: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     source: Mapped[LeadSource] = mapped_column(
         SAEnum(LeadSource, name="lead_source", create_constraint=True),
         nullable=False,

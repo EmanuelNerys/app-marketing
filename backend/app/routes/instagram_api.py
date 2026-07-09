@@ -1,7 +1,10 @@
 import logging
+import uuid
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -85,6 +88,64 @@ async def get_instagram_profile(
 
 
 # ---------------------------------------------------------------------------
+# Upload de mídia — hospeda o arquivo localmente e devolve uma URL pública.
+# A API de publicação do Instagram NÃO aceita bytes: ela busca a mídia por
+# uma URL que precisa ser acessível pela internet (em dev, via túnel ngrok).
+# ---------------------------------------------------------------------------
+
+UPLOAD_DIR = Path("uploads")
+_IMAGE_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+_VIDEO_EXT = {"video/mp4": ".mp4", "video/quicktime": ".mov"}
+_MAX_IMAGE = 8 * 1024 * 1024
+_MAX_VIDEO = 100 * 1024 * 1024
+
+
+@router.post("/upload-media")
+async def upload_media_for_post(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Recebe uma imagem/vídeo, guarda no servidor e retorna a URL pública dela."""
+    mime = file.content_type or ""
+    if mime in _IMAGE_EXT:
+        media_type, ext, limit = "IMAGE", _IMAGE_EXT[mime], _MAX_IMAGE
+    elif mime in _VIDEO_EXT:
+        media_type, ext, limit = "VIDEO", _VIDEO_EXT[mime], _MAX_VIDEO
+    else:
+        raise HTTPException(
+            415,
+            "Formato não suportado. Use JPEG/PNG/WebP (imagem) ou MP4/MOV (vídeo).",
+        )
+
+    content = await file.read()
+    if len(content) > limit:
+        raise HTTPException(413, f"Arquivo excede o limite de {limit // (1024 * 1024)} MB.")
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    # Nome imprevisível (uuid) — a URL é pública, então não deve ser adivinhável
+    fname = f"{uuid.uuid4().hex}{ext}"
+    (UPLOAD_DIR / fname).write_bytes(content)
+
+    media_url = f"{settings.public_backend_url}/api/v1/instagram/uploads/{fname}"
+    logger.info("Mídia de post enviada: %s (%s, %d bytes)", fname, media_type, len(content))
+    return {"media_url": media_url, "media_type": media_type}
+
+
+@router.get("/uploads/{filename}")
+async def serve_uploaded_media(filename: str):
+    """
+    Serve uma mídia enviada, SEM autenticação — os servidores da Meta precisam
+    buscar essa URL ao publicar o post. O nome é um uuid imprevisível.
+    """
+    # Proteção contra path traversal: só aceita o nome-base dentro de UPLOAD_DIR
+    safe = Path(filename).name
+    path = (UPLOAD_DIR / safe).resolve()
+    if not str(path).startswith(str(UPLOAD_DIR.resolve())) or not path.is_file():
+        raise HTTPException(404, "Mídia não encontrada.")
+    return FileResponse(path)
+
+
+# ---------------------------------------------------------------------------
 # Publish media (image or video)
 # ---------------------------------------------------------------------------
 
@@ -108,6 +169,16 @@ async def publish_media(
 
         media_id = result.get("id")
         logger.info("Published media %s for account %s", media_id, current_user.tenant_id)
+
+        # Ativa a automação de comentário deste post (se definida na publicação)
+        if body.automation_keyword and media_id:
+            from app.services.post_automation import create_post_automation
+            await create_post_automation(
+                db, current_user.tenant_id, media_id,
+                body.automation_keyword, body.automation_comment_reply,
+                body.automation_dm_message, body.automation_link_message,
+            )
+
         return PublishMediaResponse(success=True, media_id=media_id, message="Publicado com sucesso!")
 
     except TokenExpiredError as e:
@@ -143,6 +214,10 @@ async def create_schedule(
         thumbnail_url=body.thumbnail_url,
         scheduled_for=scheduled_for,
         status="scheduled",
+        automation_keyword=body.automation_keyword or None,
+        automation_comment_reply=body.automation_comment_reply or None,
+        automation_dm_message=body.automation_dm_message or None,
+        automation_link_message=body.automation_link_message or None,
     )
     db.add(schedule)
     await db.flush()
@@ -251,6 +326,15 @@ async def publish_scheduled_now(
         schedule.published_at = datetime.now(timezone.utc)
         schedule.media_id_response = media_id
         await db.flush()
+
+        # Ativa a automação de comentário deste post (se definida no agendamento)
+        if schedule.automation_keyword and media_id:
+            from app.services.post_automation import create_post_automation
+            await create_post_automation(
+                db, current_user.tenant_id, media_id,
+                schedule.automation_keyword, schedule.automation_comment_reply,
+                schedule.automation_dm_message, schedule.automation_link_message,
+            )
 
         return PublishMediaResponse(success=True, media_id=media_id, message="Publicado com sucesso!")
 

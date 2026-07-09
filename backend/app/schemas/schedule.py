@@ -3,7 +3,15 @@ from typing import Optional
 from datetime import datetime
 
 
-class ScheduleCreate(BaseModel):
+class PostAutomationFields(BaseModel):
+    """Automação de comentário definida junto com o post."""
+    automation_keyword: Optional[str] = None
+    automation_comment_reply: Optional[str] = None
+    automation_dm_message: Optional[str] = None
+    automation_link_message: Optional[str] = None
+
+
+class ScheduleCreate(PostAutomationFields):
     ig_user_id: str
     media_url: str
     media_type: str = "IMAGE"
@@ -34,13 +42,17 @@ class ScheduleResponse(BaseModel):
     status: str
     error_message: Optional[str] = None
     media_id_response: Optional[str] = None
+    automation_keyword: Optional[str] = None
+    automation_comment_reply: Optional[str] = None
+    automation_dm_message: Optional[str] = None
+    automation_link_message: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class PublishMediaRequest(BaseModel):
+class PublishMediaRequest(PostAutomationFields):
     ig_user_id: str
     media_url: str
     media_type: str = "IMAGE"

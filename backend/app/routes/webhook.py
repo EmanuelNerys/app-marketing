@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ from app.models.meta_connection import MetaConnection, PROVIDER_INSTAGRAM, PROVI
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services import instagram_service
+from app.services.lead_merge import auto_merge_by_phone
 from app.services.meta_token_service import safe_decrypt_token, decrypt_token
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,8 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     for item in payload.get("entry", []):
         entry_id = item.get("id", "")
 
+        # Formato 1: entry[].changes[] — usado por WhatsApp (messages) e
+        # comentários do Instagram (field="comments").
         for change in item.get("changes", []):
             field = change.get("field")
             value = change.get("value", {})
@@ -106,6 +110,18 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
                     logger.warning("No IG tenant for page_id=%s", entry_id)
                     continue
                 await _route_change(field, value, account, db)
+
+        # Formato 2: entry[].messaging[] — DMs do Instagram (Messenger Platform).
+        # Cada item já é o "value" (sender/recipient/message ou reaction), sem
+        # o wrapper de changes/field.
+        messaging = item.get("messaging", [])
+        if messaging:
+            account = await _resolve_tenant_by_page_id(entry_id, db)
+            if not account:
+                logger.warning("No IG tenant for messaging entry.id=%s", entry_id)
+                continue
+            for msg_value in messaging:
+                await handle_ig_dm(account, msg_value, db)
 
     return {"status": "received"}
 
@@ -127,6 +143,62 @@ async def _route_change(field: str, value: dict, account: Account, db: AsyncSess
 
 
 # ---------------------------------------------------------------------------
+# Personalização de mensagens — {{variáveis}}
+# ---------------------------------------------------------------------------
+
+_VAR_PATTERN = re.compile(r"\{\{\s*([\w_]+)\s*\}\}")
+
+
+def render_vars(text: str | None, context: dict[str, str]) -> str | None:
+    """
+    Substitui {{variavel}} pelos valores do contexto. Variáveis desconhecidas
+    viram string vazia (para não vazar '{{x}}' cru para o cliente).
+    """
+    if not text:
+        return text
+    return _VAR_PATTERN.sub(lambda m: str(context.get(m.group(1).strip().lower(), "")), text)
+
+
+async def _build_person_context(
+    token: str | None, user_id: str | None, username: str | None, db_name: str | None = None,
+) -> dict[str, str]:
+    """
+    Monta o contexto de personalização ({{usuario}}, {{nome}}, {{primeiro_nome}}).
+    Busca o nome real no perfil do Instagram quando possível; cai para o @ ou
+    para o nome já conhecido (db_name) quando a busca não estiver disponível.
+    """
+    full_name = db_name or ""
+    uname = username or ""
+    if token and user_id and not full_name:
+        try:
+            prof = await instagram_service.get_user_profile(token, user_id)
+            full_name = prof.get("name") or ""
+            uname = uname or prof.get("username") or ""
+        except Exception as exc:
+            logger.debug("Falha ao buscar perfil para personalização (%s): %s", user_id, exc)
+    display = full_name or uname
+    first = display.split(" ")[0] if display else ""
+    return {"usuario": uname, "nome": display, "primeiro_nome": first}
+
+
+async def _send_ig_bot_dm(token, tenant_id, conv, recipient_id, text, db) -> None:
+    """Envia uma DM do bot no Instagram, persiste a mensagem e transmite via WebSocket."""
+    resp = await instagram_service.send_dm(token, recipient_id, text)
+    bot_msg = Message(
+        tenant_id=tenant_id, conversation_id=conv.id, sender="bot", text=text,
+        direction="outbound", wa_id=recipient_id, status="sent",
+        message_id=resp.get("message_id"), is_within_24h_window=True,
+    )
+    db.add(bot_msg)
+    await db.flush()
+    await ws_manager.broadcast(tenant_id, "new_message", {
+        "id": bot_msg.id, "conversation_id": conv.id, "sender": "bot", "text": text,
+        "direction": "outbound", "wa_id": recipient_id, "status": "sent",
+        "created_at": bot_msg.created_at.isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
 # Instagram comment handler — salva lead + auto-reply por keyword
 # ---------------------------------------------------------------------------
 
@@ -141,23 +213,32 @@ async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
     }
     """
     from_data = value.get("from", {})
-    instagram_handle = from_data.get("username") or from_data.get("id", "unknown")
+    # Chaveia o lead pelo IGSID (from.id) — o MESMO id que vem no DM (sender.id).
+    # Assim, quando a pessoa comenta e depois responde no direto, é o mesmo lead
+    # (o @username sozinho não casaria com o PSID do DM).
+    commenter_id = from_data.get("id") or ""
+    commenter_username = from_data.get("username") or ""
+    lead_key = commenter_id or commenter_username or "unknown"
     comment_id = value.get("id", "")
     comment_text = value.get("text", "")
     media_id = value.get("media", {}).get("id")
 
-    # Salva o lead (cada comentário pode gerar um novo lead ou reusar existente)
-    existing = await _find_lead(account.id, instagram_handle, db)
-    if not existing:
+    # Upsert do lead
+    lead = await _find_lead(account.id, lead_key, db)
+    if not lead:
         lead = Lead(
+            id=str(uuid.uuid4()),
             account_id=account.id,
-            instagram_handle=instagram_handle,
+            instagram_handle=lead_key,
+            name=commenter_username or lead_key,
             source=LeadSource.INSTAGRAM_COMMENT,
             status=LeadStatus.NEW,
-            metadata_json=json.dumps({"comment_id": comment_id, "text": comment_text}),
+            metadata_json=json.dumps({"comment_id": comment_id, "text": comment_text,
+                                      "ig_username": commenter_username}),
         )
         db.add(lead)
-        logger.info("Novo lead (comentário): %s | conta %s", instagram_handle, account.id)
+        await db.flush()
+        logger.info("Novo lead (comentário): %s | conta %s", lead_key, account.id)
 
     # Verifica automações ativas para esse tenant (escopo: comentário, opcionalmente por post)
     if comment_text:
@@ -165,8 +246,17 @@ async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
         if matched:
             token = await _get_token(account, db)
             if token and comment_id:
+                # Personalização: {{primeiro_nome}}, {{nome}}, {{usuario}}
+                ctx = await _build_person_context(token, commenter_id, commenter_username)
+                # Guarda o nome real do perfil no lead, para a 2ª DM (link) e o
+                # inbox exibirem "Davi Meira" em vez do @ ou do id.
+                if ctx.get("nome") and ctx["nome"] != lead.instagram_handle:
+                    lead.name = ctx["nome"]
+
                 # Resposta pública no comentário (mantém o comportamento legado como fallback)
-                reply_text = matched.comment_reply_message or matched.auto_reply_message
+                reply_text = render_vars(
+                    matched.comment_reply_message or matched.auto_reply_message, ctx
+                )
                 if reply_text:
                     try:
                         await instagram_service.reply_to_comment(token, comment_id, reply_text)
@@ -174,13 +264,23 @@ async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
                     except Exception as exc:
                         logger.warning("Falha no auto-reply de comentário: %s", exc)
 
-                # DM privada disparada pelo comentário ("comenta X e recebe no direto")
+                # 1ª DM privada disparada pelo comentário ("comenta X e recebe no direto")
                 if matched.dm_message:
+                    dm_text = render_vars(matched.dm_message, ctx)
                     try:
-                        await instagram_service.send_private_reply(token, comment_id, matched.dm_message)
+                        await instagram_service.send_private_reply(token, comment_id, dm_text)
                         logger.info("DM privada enviada para comentário %s", comment_id)
                     except Exception as exc:
                         logger.warning("Falha ao enviar DM privada do comentário %s: %s", comment_id, exc)
+
+                # Estado do fluxo, consumido quando a pessoa responder no direto:
+                #  - com 2ª mensagem (link): guarda para enviar no próximo DM
+                #  - handoff: passa para atendente humano ao final
+                if matched.link_message:
+                    lead.pending_auto_message = matched.link_message
+                if matched.handoff_to_human:
+                    lead.pending_handoff = True
+                await db.flush()
 
     await dispatch_event("ig_comment", account.id, value)
 
@@ -272,20 +372,38 @@ async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
         if quoted:
             context_text = quoted.text or f"[{quoted.media_type or 'mídia'}]"
 
-    # Upsert lead (PSID como handle externo — nome real pode ser buscado depois)
+    # Upsert lead. O webhook só traz o PSID do remetente; buscamos o perfil
+    # (nome, @username, foto) na Graph API para exibir o nome real no inbox.
     lead = await _find_lead(tenant_id, sender_id, db)
     if not lead:
+        display_name = sender_id
+        username: str | None = None
+        profile_pic: str | None = None
+        token = await _get_token(account, db)
+        if token:
+            try:
+                profile = await instagram_service.get_user_profile(token, sender_id)
+                display_name = profile.get("name") or profile.get("username") or sender_id
+                username = profile.get("username")
+                profile_pic = profile.get("profile_pic")
+            except Exception as exc:
+                logger.debug("Falha ao buscar perfil IG de %s: %s", sender_id, exc)
+
         lead = Lead(
             id=str(uuid.uuid4()),
             account_id=tenant_id,
             instagram_handle=sender_id,
-            name=sender_id,
+            name=display_name,
             source=LeadSource.INSTAGRAM_DM,
             status=LeadStatus.NEW,
-            metadata_json=json.dumps({"first_message": message_text}),
+            metadata_json=json.dumps({
+                "first_message": message_text,
+                "ig_username": username,
+                "ig_profile_pic": profile_pic,
+            }),
         )
         db.add(lead)
-        logger.info("Novo lead (DM): %s | conta %s", sender_id, tenant_id)
+        logger.info("Novo lead (DM): %s (%s) | conta %s", display_name, sender_id, tenant_id)
         await db.flush()
 
     conv = await _get_or_create_conversation(tenant_id, lead.id, "instagram", db)
@@ -334,20 +452,56 @@ async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
         "last_updated": conv.last_updated.isoformat(),
     })
 
+    # Contexto de personalização (nome do lead, buscado no perfil ao criar)
+    try:
+        ig_username = json.loads(lead.metadata_json or "{}").get("ig_username")
+    except (ValueError, TypeError):
+        ig_username = None
+    person_ctx = await _build_person_context(None, None, ig_username, db_name=lead.name)
+
+    # Fluxo comentário→DM (2ª etapa): a pessoa respondeu à 1ª DM.
+    # Manda a 2ª mensagem (com link) e/ou passa para o atendente humano.
+    # Tem prioridade sobre o auto-reply por keyword e encerra o bot.
+    if lead.pending_auto_message or lead.pending_handoff:
+        token = await _get_token(account, db)
+        if token and lead.pending_auto_message:
+            link_text = render_vars(lead.pending_auto_message, person_ctx)
+            try:
+                await _send_ig_bot_dm(token, tenant_id, conv, sender_id, link_text, db)
+                logger.info("2ª DM (link) enviada para %s", sender_id)
+            except Exception as exc:
+                logger.warning("Falha ao enviar 2ª DM (link) para %s: %s", sender_id, exc)
+        lead.pending_auto_message = None
+        if lead.pending_handoff:
+            conv.bot_active = False
+            conv.atendimento_status = "aguardando"
+            lead.pending_handoff = False
+            await db.flush()
+            await ws_manager.broadcast(tenant_id, "conversation_updated", {
+                "id": conv.id, "unread_count": conv.unread_count,
+                "atendimento_status": conv.atendimento_status,
+                "bot_active": False, "last_updated": conv.last_updated.isoformat(),
+            })
+            logger.info("Handoff para humano: conversa %s (bot desligado)", conv.id)
+        await db.flush()
+        await dispatch_event("ig_dm", tenant_id, value)
+        return
+
     # Auto-reply por keyword (se configurado e bot ativo na conversa)
     if message_text and conv.bot_active:
         matched = await _match_automation(tenant_id, message_text, db, channel="dm")
         if matched:
             token = await _get_token(account, db)
             if token:
+                reply_text = render_vars(matched.auto_reply_message, person_ctx)
                 try:
-                    resp = await instagram_service.send_dm(token, sender_id, matched.auto_reply_message)
+                    resp = await instagram_service.send_dm(token, sender_id, reply_text)
                     bot_mid = resp.get("message_id")
                     bot_msg = Message(
                         tenant_id=tenant_id,
                         conversation_id=conv.id,
                         sender="bot",
-                        text=matched.auto_reply_message,
+                        text=reply_text,
                         direction="outbound",
                         wa_id=sender_id,
                         status="sent",
@@ -360,7 +514,7 @@ async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
                         "id": bot_msg.id,
                         "conversation_id": conv.id,
                         "sender": "bot",
-                        "text": matched.auto_reply_message,
+                        "text": reply_text,
                         "direction": "outbound",
                         "wa_id": sender_id,
                         "status": "sent",
@@ -561,6 +715,12 @@ async def handle_whatsapp_message(
         elif not lead.phone:
             # Lead já existia (ex: veio do Instagram) — agora temos o número
             lead.phone = normalized_phone
+            await db.flush()
+
+        # Junção automática: se já existe outro lead com o mesmo telefone
+        # (ex: a mesma pessoa que veio antes pelo Instagram e teve o número
+        # preenchido), unifica os dois num só.
+        lead = await auto_merge_by_phone(lead, db)
 
         # Find or create conversation for this wa_id
         conv = await _get_or_create_conversation(tenant_id, lead.id, "whatsapp", db)
@@ -684,13 +844,25 @@ async def dispatch_event(event_type: str, tenant_id: str, payload: dict) -> None
 # ---------------------------------------------------------------------------
 
 def _verify_signature(body: bytes, signature_header: str) -> bool:
+    """
+    Valida a assinatura do webhook. Os eventos podem vir de mais de um app da
+    Meta — WhatsApp/Facebook usam META_APP_SECRET, enquanto o Instagram Login
+    usa o app separado do Instagram (IG_APP_SECRET). Cada app assina o payload
+    com o próprio secret, então aceitamos a assinatura de qualquer um deles.
+    """
     if not signature_header.startswith("sha256="):
         return False
     expected = signature_header[7:]
-    actual = hmac.new(
-        settings.meta_app_secret.encode(), body, hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(actual, expected)
+    secrets_to_try = [settings.meta_app_secret]
+    if settings.ig_app_secret:
+        secrets_to_try.append(settings.ig_app_secret)
+    for secret in secrets_to_try:
+        if not secret:
+            continue
+        actual = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(actual, expected):
+            return True
+    return False
 
 
 async def _resolve_wpp_tenant(
@@ -753,11 +925,14 @@ async def _resolve_tenant_by_page_id(page_id: str, db: AsyncSession) -> Account 
     if account:
         return account
 
+    # O entry.id do webhook do Instagram pode ser o user_id (conta profissional)
+    # ou o id app-scoped, dependendo do produto — casamos com qualquer um.
     conn_result = await db.execute(
         select(MetaConnection).where(
             or_(
                 MetaConnection.page_id == page_id,
                 MetaConnection.ig_business_account_id == page_id,
+                MetaConnection.meta_user_id == page_id,
             )
         )
     )
@@ -769,12 +944,20 @@ async def _resolve_tenant_by_page_id(page_id: str, db: AsyncSession) -> Account 
     return None
 
 
-async def _find_lead(account_id: str, instagram_handle: str, db: AsyncSession) -> Lead | None:
+async def _find_lead(account_id: str, external_id: str, db: AsyncSession) -> Lead | None:
+    """
+    Localiza o lead por um ID externo (PSID do Instagram ou número do WhatsApp).
+    Casa tanto pelo handle primário quanto pelos IDs absorvidos numa mesclagem
+    (alt_handles), para que um lead unificado seja reencontrado por qualquer canal.
+    """
     result = await db.execute(
         select(Lead).where(
             Lead.account_id == account_id,
-            Lead.instagram_handle == instagram_handle,
-        )
+            or_(
+                Lead.instagram_handle == external_id,
+                Lead.alt_handles.like(f"%,{external_id},%"),
+            ),
+        ).limit(1)
     )
     return result.scalar_one_or_none()
 

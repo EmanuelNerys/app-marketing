@@ -13,6 +13,8 @@ class AutomationConfigCreate(BaseModel):
     media_id: Optional[str] = None
     comment_reply_message: Optional[str] = None
     dm_message: Optional[str] = None
+    link_message: Optional[str] = None
+    handoff_to_human: bool = False
     is_active: bool = True
 
 
@@ -23,6 +25,8 @@ class AutomationConfigUpdate(BaseModel):
     media_id: Optional[str] = None
     comment_reply_message: Optional[str] = None
     dm_message: Optional[str] = None
+    link_message: Optional[str] = None
+    handoff_to_human: Optional[bool] = None
     is_active: Optional[bool] = None
 
 
@@ -35,6 +39,8 @@ class AutomationConfigResponse(BaseModel):
     media_id: Optional[str] = None
     comment_reply_message: Optional[str] = None
     dm_message: Optional[str] = None
+    link_message: Optional[str] = None
+    handoff_to_human: bool = False
     is_active: bool
     created_at: datetime
 

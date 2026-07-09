@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     ngrok_authtoken: str = ""
     ngrok_domain: str = ""
 
+    # Base pública do backend (HTTPS) — usada para montar URLs de mídia que a
+    # Meta precisa buscar ao publicar posts. Em dev, é o domínio do ngrok.
+    public_base_url: str = ""
+
+    @property
+    def public_backend_url(self) -> str:
+        """URL pública do backend, com fallback para o domínio do ngrok."""
+        if self.public_base_url:
+            return self.public_base_url.rstrip("/")
+        if self.ngrok_domain:
+            return f"https://{self.ngrok_domain}"
+        return "http://localhost:8000"
+
     secret_key: str = "change_this_to_a_random_secret_key"
     jwt_algorithm: str = "HS256"
     jwt_access_expire_minutes: int = 60
