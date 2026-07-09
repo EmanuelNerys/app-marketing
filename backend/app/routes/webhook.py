@@ -521,6 +521,18 @@ async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
                         "created_at": bot_msg.created_at.isoformat(),
                     })
                     logger.info("Auto-reply DM enviado para %s", sender_id)
+
+                    # Bot de mensagem com handoff: passa para o atendente após responder
+                    if matched.handoff_to_human:
+                        conv.bot_active = False
+                        conv.atendimento_status = "aguardando"
+                        await db.flush()
+                        await ws_manager.broadcast(tenant_id, "conversation_updated", {
+                            "id": conv.id, "unread_count": conv.unread_count,
+                            "atendimento_status": conv.atendimento_status,
+                            "bot_active": False, "last_updated": conv.last_updated.isoformat(),
+                        })
+                        logger.info("Handoff (bot de mensagem): conversa %s", conv.id)
                 except Exception as exc:
                     logger.warning("Falha no auto-reply de DM: %s", exc)
 
@@ -817,6 +829,17 @@ async def handle_whatsapp_message(
                         "status": "sent",
                         "created_at": bot_msg.created_at.isoformat(),
                     })
+
+                    # Bot de mensagem com handoff: passa para o atendente após responder
+                    if matched.handoff_to_human:
+                        conv.bot_active = False
+                        conv.atendimento_status = "aguardando"
+                        await db.flush()
+                        await ws_manager.broadcast(tenant_id, "conversation_updated", {
+                            "id": conv.id, "unread_count": conv.unread_count,
+                            "atendimento_status": conv.atendimento_status,
+                            "bot_active": False, "last_updated": conv.last_updated.isoformat(),
+                        })
                 except Exception as exc:
                     logger.warning("Falha no auto-reply WhatsApp: %s", exc)
 
@@ -973,8 +996,11 @@ async def _match_automation(
     Retorna a primeira AutomationConfig ativa cuja keyword aparece no texto.
 
     channel: "comment" (comentário IG), "dm" (DM IG ou mensagem WhatsApp).
-    Uma automação com trigger_type="both" reage nos dois canais; media_id
-    restringe o disparo a comentários de um post específico quando definido.
+
+    Regra de escopo (evita disparo duplicado):
+      - comentário SÓ casa com um funil amarrado àquele post (media_id igual).
+        Não existe funil de comentário "para todos os posts".
+      - DM/WhatsApp casa com bots de mensagem (sem post associado).
     """
     result = await db.execute(
         select(AutomationConfig).where(
@@ -985,8 +1011,14 @@ async def _match_automation(
     for config in result.scalars().all():
         if config.trigger_type not in ("both", channel):
             continue
-        if config.media_id and config.media_id != media_id:
-            continue
+        if channel == "comment":
+            # Comentário: só funil deste post específico (nunca global)
+            if not config.media_id or config.media_id != media_id:
+                continue
+        else:
+            # DM/WhatsApp: ignora funis de post (que têm media_id)
+            if config.media_id:
+                continue
         if config.keyword.lower() in text.lower():
             return config
     return None

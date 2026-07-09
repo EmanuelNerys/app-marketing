@@ -172,6 +172,45 @@ async def test_flow_without_link_hands_off(client, db_session, _mock_ig):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
+async def test_message_bot_handoff(client, db_session, _mock_ig):
+    """Bot de mensagem (DM) com handoff: responde e passa a conversa para humano."""
+    account = await _ig_tenant(db_session, "IG5")
+    db_session.add(AutomationConfig(
+        account_id=account.id, keyword="PRECO", trigger_type="dm", media_id=None,
+        auto_reply_message="Nossos planos começam em R$97, {{primeiro_nome}}!",
+        handoff_to_human=True, is_active=True,
+    ))
+    await db_session.flush()
+
+    await _post(client, _dm("IG5", "PSID_D", "quanto é o PRECO?"))
+
+    conv = (await db_session.execute(
+        select(Conversation).where(Conversation.tenant_id == account.id)
+    )).scalar_one()
+    assert conv.bot_active is False                    # passou para humano após responder
+    assert conv.atendimento_status == "aguardando"
+    # respondeu personalizado
+    sent = [c.args[2] for c in _mock_ig.call_args_list]
+    assert any("R$97" in s for s in sent)
+
+
+@pytest.mark.asyncio
+async def test_comment_without_post_scope_is_ignored(client, db_session, _mock_ig):
+    """Automação de comentário sem media_id NÃO dispara (funil é sempre por post)."""
+    account = await _ig_tenant(db_session, "IG6")
+    db_session.add(AutomationConfig(
+        account_id=account.id, keyword="QUERO", trigger_type="comment", media_id=None,
+        auto_reply_message="x", comment_reply_message="não deveria disparar",
+        is_active=True,
+    ))
+    await db_session.flush()
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock) as mock_reply:
+        await _post(client, _comment("IG6", "QUALQUER_POST", "PSID_E", "QUERO"))
+        mock_reply.assert_not_called()                 # sem escopo de post → não casa
+
+
+@pytest.mark.asyncio
 async def test_wrong_post_does_not_trigger(client, db_session, _mock_ig):
     account = await _ig_tenant(db_session, "IG4")
     db_session.add(AutomationConfig(

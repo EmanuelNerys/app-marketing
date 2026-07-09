@@ -231,6 +231,8 @@ async def test_keyword_triggers_auto_reply(client, db_session):
         account_id=account.id,
         keyword="quero",
         auto_reply_message="Olá! Em breve te respondo 😊",
+        trigger_type="comment",
+        media_id="POST_AR",
         is_active=True,
     )
     db_session.add(config)
@@ -242,7 +244,8 @@ async def test_keyword_triggers_auto_reply(client, db_session):
             "id": "PAGE_003",
             "changes": [{
                 "field": "comments",
-                "value": {"from": {"id": "U2", "username": "pedro"}, "id": "C2", "text": "Quero comprar!"},
+                "value": {"from": {"id": "U2", "username": "pedro"}, "media": {"id": "POST_AR"},
+                          "id": "C2", "text": "Quero comprar!"},
             }],
         }],
     }
@@ -273,7 +276,8 @@ async def test_comment_keyword_sends_private_dm(client, db_session):
         auto_reply_message="Fallback",
         comment_reply_message="Te chamei no direto!",
         dm_message="Aqui está o link que você pediu 😉",
-        trigger_type="both",
+        trigger_type="comment",
+        media_id="POST_DM",
         is_active=True,
     )
     db_session.add(config)
@@ -285,7 +289,8 @@ async def test_comment_keyword_sends_private_dm(client, db_session):
             "id": "PAGE_005",
             "changes": [{
                 "field": "comments",
-                "value": {"from": {"id": "U5", "username": "carla"}, "id": "C5", "text": "Quero saber mais!"},
+                "value": {"from": {"id": "U5", "username": "carla"}, "media": {"id": "POST_DM"},
+                          "id": "C5", "text": "Quero saber mais!"},
             }],
         }],
     }
@@ -318,7 +323,8 @@ async def test_comment_dm_personalization_substitutes_name(client, db_session):
         auto_reply_message="Fallback",
         comment_reply_message="Te chamei no direto, {{primeiro_nome}}! 📩",
         dm_message="Oi {{nome}} (@{{usuario}})! Aqui está o que você pediu 👇",
-        trigger_type="both",
+        trigger_type="comment",
+        media_id="POST_PERSO",
         is_active=True,
     )
     db_session.add(config)
@@ -330,7 +336,8 @@ async def test_comment_dm_personalization_substitutes_name(client, db_session):
             "id": "PAGE_PERSO",
             "changes": [{
                 "field": "comments",
-                "value": {"from": {"id": "U9", "username": "carla"}, "id": "C9", "text": "Quero!"},
+                "value": {"from": {"id": "U9", "username": "carla"}, "media": {"id": "POST_PERSO"},
+                          "id": "C9", "text": "Quero!"},
             }],
         }],
     }
