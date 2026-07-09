@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, asc
+from sqlalchemy import select, asc, desc
 
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -43,6 +43,7 @@ class MessageOut(BaseModel):
     is_within_24h_window: bool
     template_vars: dict | None
     template_name: str | None
+    payload: dict | None
     created_at: datetime
 
     class Config:
@@ -56,10 +57,34 @@ class SendMessageRequest(BaseModel):
     wa_id: str | None = None
     media_type: str | None = None
     media_url: str | None = None
+    # Mídia enviada via POST /whatsapp/media/upload (envio por Media ID)
+    media_id: str | None = None
+    media_filename: str | None = None
+    # ID (do banco) da mensagem sendo respondida — vira quote no WhatsApp
+    reply_to_message_id: int | None = None
     template_name: str | None = None
     template_vars: dict | None = None
     message_id: str | None = None
     payload: dict | None = None
+
+
+# Janela de atendimento do WhatsApp: 24h após a última mensagem do cliente
+WA_SESSION_WINDOW = timedelta(hours=24)
+
+
+async def _last_inbound_at(conv_id: str, db: AsyncSession) -> datetime | None:
+    result = await db.execute(
+        select(Message.created_at).where(
+            Message.conversation_id == conv_id,
+            Message.direction == "inbound",
+        ).order_by(desc(Message.created_at)).limit(1)
+    )
+    row = result.first()
+    if not row:
+        return None
+    ts = row[0]
+    # SQLite (testes) devolve datetime naive — normaliza para UTC
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +124,9 @@ async def send_message(
     status = "sent"
     message_id = body.message_id
     wa_id = body.wa_id
+    media_url = body.media_url
+    context_text: str | None = None
+    within_window = True
 
     # Envio real via WhatsApp Cloud API (apenas mensagens outbound).
     if body.direction == "outbound":
@@ -117,10 +145,56 @@ async def send_message(
             )
         ).scalar_one_or_none()
 
-        if conn and wa_id and (body.text or body.media_url):
+        # Janela de 24h: mensagem livre só pode ser enviada se o cliente
+        # respondeu nas últimas 24h. Fora dela, a Meta rejeita — orienta a
+        # usar template em vez de deixar falhar silenciosamente.
+        if conn and wa_id:
+            last_inbound = await _last_inbound_at(conv_id, db)
+            within_window = (
+                last_inbound is not None
+                and datetime.now(timezone.utc) - last_inbound < WA_SESSION_WINDOW
+            )
+            if not within_window and not body.template_name:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "outside_24h_window",
+                        "message": (
+                            "Janela de 24h expirada — o cliente não responde há mais de "
+                            "24 horas. Envie um template aprovado para reabrir a conversa."
+                        ),
+                    },
+                )
+
+        # Reply (quote): resolve o wamid e o texto da mensagem citada
+        reply_to_wamid: str | None = None
+        if body.reply_to_message_id:
+            target = (
+                await db.execute(
+                    select(Message).where(
+                        Message.id == body.reply_to_message_id,
+                        Message.conversation_id == conv_id,
+                        Message.tenant_id == current_user.tenant_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if target:
+                reply_to_wamid = target.message_id
+                context_text = target.text or f"[{target.media_type or 'mídia'}]"
+
+        if conn and wa_id and (body.text or body.media_url or body.media_id):
             try:
                 token = decrypt_token(conn.access_token_encrypted)
-                if body.media_type and body.media_url:
+                if body.media_id and body.media_type:
+                    resp = await whatsapp_service.send_media_by_id(
+                        token, conn.phone_number_id, wa_id,
+                        body.media_type, body.media_id,
+                        caption=body.text, filename=body.media_filename,
+                        reply_to=reply_to_wamid,
+                    )
+                    # Guarda o caminho do proxy para exibir a mídia no chat
+                    media_url = f"/whatsapp/media/{body.media_id}"
+                elif body.media_type and body.media_url:
                     resp = await whatsapp_service.send_media(
                         token, conn.phone_number_id, wa_id,
                         body.media_type, body.media_url, body.text,
@@ -128,6 +202,7 @@ async def send_message(
                 else:
                     resp = await whatsapp_service.send_text(
                         token, conn.phone_number_id, wa_id, body.text or "",
+                        reply_to=reply_to_wamid,
                     )
                 sent_id = (resp.get("messages") or [{}])[0].get("id")
                 if sent_id:
@@ -143,6 +218,10 @@ async def send_message(
                 "Sem conexão WhatsApp ativa — mensagem apenas armazenada (conv=%s)", conv_id
             )
 
+    payload = body.payload
+    if body.media_filename:
+        payload = {**(payload or {}), "filename": body.media_filename}
+
     msg = Message(
         tenant_id=current_user.tenant_id,
         conversation_id=conv_id,
@@ -153,10 +232,12 @@ async def send_message(
         status=status,
         message_id=message_id,
         media_type=body.media_type,
-        media_url=body.media_url,
+        media_url=media_url,
+        context_text=context_text,
+        is_within_24h_window=within_window,
         template_name=body.template_name,
         template_vars=body.template_vars,
-        payload=body.payload,
+        payload=payload,
     )
     db.add(msg)
     await db.flush()

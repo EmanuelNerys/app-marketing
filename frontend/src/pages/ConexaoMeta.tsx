@@ -10,14 +10,14 @@ declare global {
   }
 }
 
-function loadFacebookSdk(appId: string): Promise<void> {
+function loadFacebookSdk(appId: string, graphVersion = 'v21.0'): Promise<void> {
   return new Promise((resolve) => {
     if (window.FB) {
       resolve()
       return
     }
     window.fbAsyncInit = () => {
-      window.FB!.init({ appId, autoLogAppEvents: true, xfbml: false, version: 'v21.0' })
+      window.FB!.init({ appId, autoLogAppEvents: true, xfbml: false, version: graphVersion })
       resolve()
     }
     if (document.getElementById('facebook-jssdk')) return
@@ -111,7 +111,7 @@ export default function ConexaoMeta() {
   const [waError, setWaError] = useState('')
 
   const waCode = useRef<string | null>(null)
-  const waPayload = useRef<{ waba_id?: string; phone_number_id?: string } | null>(null)
+  const waPayload = useRef<{ waba_id?: string; phone_number_id?: string; business_id?: string } | null>(null)
   const waCompleting = useRef(false)
 
   useEffect(() => {
@@ -119,11 +119,12 @@ export default function ConexaoMeta() {
     else setLoading(false)
   }, [accountId])
 
-  // Escuta os eventos do Embedded Signup emitidos pela janela do Facebook
-  // (postMessage com origin facebook.com, formato WA_EMBEDDED_SIGNUP).
+  // Escuta as informações da sessão (session info v3) do Embedded Signup,
+  // emitidas pela janela do Facebook via postMessage (formato WA_EMBEDDED_SIGNUP).
   useEffect(() => {
     function onFbMessage(event: MessageEvent) {
       if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return
+      if (typeof event.data !== 'string') return
       let data: any
       try {
         data = JSON.parse(event.data)
@@ -133,16 +134,30 @@ export default function ConexaoMeta() {
       if (data?.type !== 'WA_EMBEDDED_SIGNUP') return
 
       if (data.event === 'CANCEL') {
+        // v3 informa em qual etapa o usuário abandonou o fluxo
+        if (data.data?.current_step) {
+          setWaError(`Cadastro cancelado na etapa "${data.data.current_step}". Tente novamente.`)
+        }
         setConnecting(null)
         setModal({ state: null, provider: null })
       } else if (data.event === 'ERROR') {
         setWaError(data.data?.error_message || 'Erro no cadastro do WhatsApp.')
         setConnecting(null)
         setModal({ state: null, provider: null })
+      } else if (data.event === 'FINISH_ONLY_WABA') {
+        // Conta criada sem número de telefone — não dá para enviar mensagens
+        setWaError(
+          'A conta do WhatsApp Business foi criada, mas nenhum número de telefone foi adicionado. ' +
+          'Refaça a conexão e adicione um número no fluxo.',
+        )
+        setConnecting(null)
+        setModal({ state: null, provider: null })
       } else if (typeof data.event === 'string' && data.event.startsWith('FINISH')) {
+        // FINISH ou FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING: temos WABA + número
         waPayload.current = {
           waba_id: data.data?.waba_id,
           phone_number_id: data.data?.phone_number_id,
+          business_id: data.data?.business_id,
         }
         tryCompleteEmbeddedSignup()
       }
@@ -161,6 +176,7 @@ export default function ConexaoMeta() {
         code: waCode.current,
         waba_id: waPayload.current.waba_id,
         phone_number_id: waPayload.current.phone_number_id,
+        business_id: waPayload.current.business_id,
       })
       setConnecting(null)
       setModal({ state: 'success', provider: 'whatsapp' })
@@ -175,18 +191,28 @@ export default function ConexaoMeta() {
     }
   }
 
+  interface EmbeddedSignupConfig {
+    app_id: string
+    config_id: string
+    graph_api_version: string
+    version: string
+    session_info_version: string
+    setup: Record<string, any>
+  }
+
   async function handleConnectWhatsApp() {
     setError('')
     setWaError('')
     setConnecting('whatsapp')
     try {
-      const { data } = await api.get<{ app_id: string; config_id: string }>('/whatsapp/embedded-signup/config')
-      await loadFacebookSdk(data.app_id)
+      const { data } = await api.get<EmbeddedSignupConfig>('/whatsapp/embedded-signup/config')
+      await loadFacebookSdk(data.app_id, data.graph_api_version)
 
       setModal({ state: 'waiting', provider: 'whatsapp' })
       window.FB.login(
         (response: any) => {
           if (response.authResponse?.code) {
+            // Troca o code por token no backend (server-to-server, exige app secret)
             waCode.current = response.authResponse.code
             tryCompleteEmbeddedSignup()
           } else {
@@ -198,7 +224,13 @@ export default function ConexaoMeta() {
           config_id: data.config_id,
           response_type: 'code',
           override_default_response_type: true,
-          extras: { setup: {}, sessionInfoVersion: '3' },
+          extras: {
+            // Preenchimento automático com os dados do tenant (nome, e-mail)
+            setup: data.setup ?? {},
+            featureType: '',
+            sessionInfoVersion: data.session_info_version || '3',
+            version: data.version || 'v4',
+          },
         },
       )
     } catch (err: any) {

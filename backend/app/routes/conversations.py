@@ -283,6 +283,86 @@ async def update_conversation(
     return conv
 
 
+@router.post("/{conv_id}/read", response_model=ConversationOut)
+async def mark_conversation_read(
+    conv_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Agente abriu a conversa: zera o contador local e envia confirmação de
+    leitura (ticks azuis) para a última mensagem do cliente na Meta.
+    """
+    conv = await _get_or_404(conv_id, current_user.tenant_id, db)
+    conv.unread_count = 0
+    await db.flush()
+
+    wamid = await _latest_inbound_wamid(conv_id, db)
+    if wamid:
+        conn = await _active_wpp_conn(current_user.tenant_id, db)
+        if conn:
+            try:
+                token = decrypt_token(conn.access_token_encrypted)
+                await whatsapp_service.mark_as_read(token, conn.phone_number_id, wamid)
+            except Exception as exc:
+                logger.debug("mark_as_read falhou (conv=%s): %s", conv_id, exc)
+
+    await db.refresh(conv)
+    await ws_manager.broadcast(
+        current_user.tenant_id,
+        "conversation_updated",
+        ConversationOut.model_validate(conv).model_dump(mode="json"),
+    )
+    return conv
+
+
+@router.post("/{conv_id}/typing", status_code=204)
+async def send_typing(
+    conv_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Mostra "digitando..." para o cliente (dura até 25s ou até o envio).
+    Best-effort: falhas não interrompem o fluxo do agente.
+    """
+    await _get_or_404(conv_id, current_user.tenant_id, db)
+    wamid = await _latest_inbound_wamid(conv_id, db)
+    if not wamid:
+        return
+    conn = await _active_wpp_conn(current_user.tenant_id, db)
+    if not conn:
+        return
+    try:
+        token = decrypt_token(conn.access_token_encrypted)
+        await whatsapp_service.send_typing_indicator(token, conn.phone_number_id, wamid)
+    except Exception as exc:
+        logger.debug("typing indicator falhou (conv=%s): %s", conv_id, exc)
+
+
+async def _latest_inbound_wamid(conv_id: str, db: AsyncSession) -> str | None:
+    result = await db.execute(
+        select(Message.message_id).where(
+            Message.conversation_id == conv_id,
+            Message.direction == "inbound",
+            Message.message_id.isnot(None),
+        ).order_by(desc(Message.created_at)).limit(1)
+    )
+    row = result.first()
+    return row[0] if row else None
+
+
+async def _active_wpp_conn(tenant_id: str, db: AsyncSession) -> MetaConnection | None:
+    result = await db.execute(
+        select(MetaConnection).where(
+            MetaConnection.account_id == tenant_id,
+            MetaConnection.provider == PROVIDER_WHATSAPP,
+            MetaConnection.status == STATUS_ACTIVE,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 @router.delete("/{conv_id}", status_code=204)
 async def delete_conversation(
     conv_id: str,
