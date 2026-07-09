@@ -284,6 +284,41 @@ Restrições da Meta (não configuráveis): a DM privada só pode ser enviada at
 
 ---
 
+### Nota para Claude: Login Meta, Instagram Login e WhatsApp Embedded Signup
+
+Existem tres fluxos diferentes e eles nao devem ser misturados:
+
+1. **Facebook Login for Business / Meta OAuth**
+   - Usa `https://www.facebook.com/{version}/dialog/oauth`.
+   - No projeto fica em `/api/v1/auth/meta/start` e `/api/v1/auth/meta/callback`.
+   - Serve para conectar permissoes e ativos Meta existentes via Facebook/Business Manager, como paginas, conta de anuncios e permissoes classicas.
+   - Scopes tipicos: `pages_show_list`, `pages_read_engagement`, `instagram_manage_comments`, `ads_management`, `business_management`, `whatsapp_business_management`.
+   - Nao usar scopes `instagram_business_*` nesse fluxo, porque eles pertencem ao Instagram Login.
+
+2. **Instagram Business Login**
+   - Usa `https://www.instagram.com/oauth/authorize`.
+   - No projeto fica em `/api/v1/auth/instagram/start` e `/api/v1/auth/instagram/callback`.
+   - Serve para conectar diretamente uma conta profissional do Instagram.
+   - Scopes usados pelo projeto: `instagram_business_basic`, `instagram_business_manage_messages`, `instagram_business_manage_comments`, `instagram_business_content_publish`, `instagram_business_manage_insights`.
+   - A URL deve ser gerada pelo endpoint `/api/v1/auth/instagram/start?account_id=<tenant_id>`, porque o backend exige `state` assinado no callback.
+   - Redirect local/ngrok atual usado nos testes: `https://greedily-trunks-morally.ngrok-free.dev/api/v1/auth/instagram/callback`.
+
+3. **WhatsApp Embedded Signup**
+   - Nao e apenas OAuth com redirect.
+   - E o onboarding incorporado para criar/conectar WABA, numero de telefone e permissoes de WhatsApp do cliente.
+   - Deve usar Facebook JS SDK com `WHATSAPP_CONFIG_ID`/`config_id` e retorno via evento/postMessage.
+   - E o caminho correto para producao multi-cliente de WhatsApp.
+
+URLs configuradas no painel Meta para o Instagram Business Login:
+
+| Campo Meta | URL |
+|---|---|
+| OAuth redirect URI | `https://greedily-trunks-morally.ngrok-free.dev/api/v1/auth/instagram/callback` |
+| Deauthorize callback URL | `https://greedily-trunks-morally.ngrok-free.dev/api/v1/privacy/deauthorize` |
+| Data deletion request URL | `https://greedily-trunks-morally.ngrok-free.dev/api/v1/privacy/data-deletion` |
+
+---
+
 ## Banco de Dados
 
 ### Tabelas e relações

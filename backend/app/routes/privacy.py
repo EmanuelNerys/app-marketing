@@ -15,10 +15,14 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import get_db
+from app.models.meta_connection import MetaConnection, STATUS_REVOKED
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/privacy", tags=["privacy"])
@@ -57,6 +61,39 @@ async def privacy_policy():
         ),
         "contact": "davimvf1234@gmail.com",
     }
+
+
+@router.post("/deauthorize")
+async def deauthorize_callback(
+    signed_request: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        payload = _parse_signed_request(signed_request)
+    except ValueError as exc:
+        logger.warning("Invalid deauthorize signed_request: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    user_id = str(payload.get("user_id") or "")
+    revoked_count = 0
+
+    if user_id:
+        result = await db.execute(
+            select(MetaConnection).where(MetaConnection.meta_user_id == user_id)
+        )
+        connections = result.scalars().all()
+        for connection in connections:
+            connection.status = STATUS_REVOKED
+        revoked_count = len(connections)
+        await db.flush()
+
+    logger.info(
+        "Meta deauthorization received for user_id=%s; revoked_connections=%s",
+        user_id or "unknown",
+        revoked_count,
+    )
+
+    return {"success": True}
 
 
 # ---------------------------------------------------------------------------
