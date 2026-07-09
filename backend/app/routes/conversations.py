@@ -13,10 +13,12 @@ from app.core.ws_manager import ws_manager
 from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.lead import Lead
-from app.models.meta_connection import MetaConnection, PROVIDER_WHATSAPP, STATUS_ACTIVE
+from app.models.meta_connection import (
+    MetaConnection, PROVIDER_WHATSAPP, PROVIDER_INSTAGRAM, STATUS_ACTIVE,
+)
 from app.models.message import Message
 from app.services.meta_token_service import decrypt_token
-from app.services import whatsapp_service
+from app.services import whatsapp_service, instagram_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -31,6 +33,7 @@ class ConversationOut(BaseModel):
     tenant_id: str
     customer_id: str | None
     atendente_id: str | None
+    channel: str = "whatsapp"
     atendimento_status: str
     status: str
     unread_count: int
@@ -183,6 +186,7 @@ async def start_conversation_with_template(
 async def list_conversations(
     status: str | None = Query(None),
     atendente_id: str | None = Query(None),
+    channel: str | None = Query(None, pattern="^(whatsapp|instagram)$"),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
@@ -193,6 +197,8 @@ async def list_conversations(
         q = q.where(Conversation.status == status)
     if atendente_id:
         q = q.where(Conversation.atendente_id == atendente_id)
+    if channel:
+        q = q.where(Conversation.channel == channel)
     q = q.order_by(desc(Conversation.last_updated)).limit(limit).offset(offset)
 
     result = await db.execute(q)
@@ -297,15 +303,25 @@ async def mark_conversation_read(
     conv.unread_count = 0
     await db.flush()
 
-    wamid = await _latest_inbound_wamid(conv_id, db)
-    if wamid:
-        conn = await _active_wpp_conn(current_user.tenant_id, db)
-        if conn:
+    if conv.channel == "instagram":
+        sender_id = await _latest_inbound_sender(conv_id, db)
+        conn = await _active_conn(current_user.tenant_id, PROVIDER_INSTAGRAM, db)
+        if sender_id and conn:
             try:
                 token = decrypt_token(conn.access_token_encrypted)
-                await whatsapp_service.mark_as_read(token, conn.phone_number_id, wamid)
+                await instagram_service.mark_seen(token, sender_id)
             except Exception as exc:
-                logger.debug("mark_as_read falhou (conv=%s): %s", conv_id, exc)
+                logger.debug("mark_seen (IG) falhou (conv=%s): %s", conv_id, exc)
+    else:
+        wamid = await _latest_inbound_wamid(conv_id, db)
+        if wamid:
+            conn = await _active_conn(current_user.tenant_id, PROVIDER_WHATSAPP, db)
+            if conn:
+                try:
+                    token = decrypt_token(conn.access_token_encrypted)
+                    await whatsapp_service.mark_as_read(token, conn.phone_number_id, wamid)
+                except Exception as exc:
+                    logger.debug("mark_as_read falhou (conv=%s): %s", conv_id, exc)
 
     await db.refresh(conv)
     await ws_manager.broadcast(
@@ -323,14 +339,17 @@ async def send_typing(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Mostra "digitando..." para o cliente (dura até 25s ou até o envio).
-    Best-effort: falhas não interrompem o fluxo do agente.
+    Mostra "digitando..." para o cliente no WhatsApp (dura até 25s ou até o
+    envio). Sem equivalente usado hoje para Instagram. Best-effort: falhas
+    não interrompem o fluxo do agente.
     """
-    await _get_or_404(conv_id, current_user.tenant_id, db)
+    conv = await _get_or_404(conv_id, current_user.tenant_id, db)
+    if conv.channel != "whatsapp":
+        return
     wamid = await _latest_inbound_wamid(conv_id, db)
     if not wamid:
         return
-    conn = await _active_wpp_conn(current_user.tenant_id, db)
+    conn = await _active_conn(current_user.tenant_id, PROVIDER_WHATSAPP, db)
     if not conn:
         return
     try:
@@ -352,11 +371,23 @@ async def _latest_inbound_wamid(conv_id: str, db: AsyncSession) -> str | None:
     return row[0] if row else None
 
 
-async def _active_wpp_conn(tenant_id: str, db: AsyncSession) -> MetaConnection | None:
+async def _latest_inbound_sender(conv_id: str, db: AsyncSession) -> str | None:
+    result = await db.execute(
+        select(Message.wa_id).where(
+            Message.conversation_id == conv_id,
+            Message.direction == "inbound",
+            Message.wa_id.isnot(None),
+        ).order_by(desc(Message.created_at)).limit(1)
+    )
+    row = result.first()
+    return row[0] if row else None
+
+
+async def _active_conn(tenant_id: str, provider: str, db: AsyncSession) -> MetaConnection | None:
     result = await db.execute(
         select(MetaConnection).where(
             MetaConnection.account_id == tenant_id,
-            MetaConnection.provider == PROVIDER_WHATSAPP,
+            MetaConnection.provider == provider,
             MetaConnection.status == STATUS_ACTIVE,
         )
     )

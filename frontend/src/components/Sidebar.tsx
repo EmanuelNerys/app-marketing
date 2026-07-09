@@ -57,6 +57,7 @@ export default function Sidebar() {
       items: [
         { to: '/app/studio', label: 'Studio de Criação', icon: Clapperboard },
         { to: '/app/publicar', label: 'Publicar', icon: Send },
+        { to: '/app/instagram-dm', label: 'Direct', icon: MessageSquare },
         { to: '/app/automacao', label: 'Automação', icon: Zap },
       ],
     },

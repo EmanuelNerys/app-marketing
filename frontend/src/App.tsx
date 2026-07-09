@@ -15,7 +15,9 @@ import Pricing from './pages/Pricing'
 import CompletarCadastro from './pages/CompletarCadastro'
 import Clients from './pages/Clients'
 import Marketing from './pages/Marketing'
+import MarketingCampaignDetail from './pages/MarketingCampaignDetail'
 import WhatsApp from './pages/WhatsApp'
+import InstagramInbox from './pages/InstagramInbox'
 import Templates from './pages/Templates'
 import Equipe from './pages/Equipe'
 import FollowUps from './pages/FollowUps'
@@ -45,6 +47,7 @@ export default function App() {
           <Route path="/app/automacao" element={<Automacao />} />
           <Route path="/app/publicar" element={<PublicarInstagram />} />
           <Route path="/app/whatsapp" element={<WhatsApp />} />
+          <Route path="/app/instagram-dm" element={<InstagramInbox />} />
           <Route path="/app/templates" element={<Templates />} />
           <Route path="/app/equipe" element={<Equipe />} />
           <Route path="/app/followups" element={<FollowUps />} />
@@ -52,6 +55,7 @@ export default function App() {
           <Route path="/app/configuracoes" element={<Configuracoes />} />
           <Route path="/app/clientes" element={<Clients />} />
           <Route path="/app/marketing" element={<Marketing />} />
+          <Route path="/app/marketing/:campaignId" element={<MarketingCampaignDetail />} />
         </Route>
       </Routes>
     </BrowserRouter>

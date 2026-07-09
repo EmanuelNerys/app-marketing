@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 import httpx
 
 from app.core.database import get_db
@@ -191,52 +191,186 @@ async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
 
 async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
     """
-    Payload example:
+    Payload example (mensagem):
     {
       "sender": {"id": "PSID_DO_USUARIO"},
-      "recipient": {"id": "PAGE_ID"},
+      "recipient": {"id": "IG_BUSINESS_ID"},
       "timestamp": 1234567890,
-      "message": {"mid": "MSG_ID", "text": "oi quero informações"}
+      "message": {
+        "mid": "MSG_ID", "text": "oi quero informações", "is_echo": false,
+        "attachments": [{"type": "image", "payload": {"url": "https://..."}}],
+        "reply_to": {"mid": "MSG_ID_ANTERIOR"}
+      }
     }
+    Ou uma reação: {"sender": {...}, "recipient": {...},
+                     "reaction": {"mid": "MSG_ID", "action": "react", "emoji": "❤️"}}
     """
+    tenant_id = account.id
     sender_id = value.get("sender", {}).get("id", "")
-    message = value.get("message", {})
-    message_text = message.get("text", "")
+    recipient_id = value.get("recipient", {}).get("id", "")
+    if not sender_id or not recipient_id:
+        return
+
+    # ---- Reação a uma mensagem existente: atualiza, não cria nova ----
+    reaction = value.get("reaction")
+    if reaction:
+        target_mid = reaction.get("mid")
+        removed = reaction.get("action") == "unreact"
+        emoji = None if removed else (reaction.get("emoji") or reaction.get("reaction"))
+        if target_mid:
+            result = await db.execute(
+                select(Message).where(Message.message_id == target_mid, Message.tenant_id == tenant_id)
+            )
+            target = result.scalar_one_or_none()
+            if target:
+                target.payload = {**(target.payload or {}), "customer_reaction": emoji}
+                await db.flush()
+                await ws_manager.broadcast(tenant_id, "message_reaction", {
+                    "conversation_id": target.conversation_id,
+                    "message_db_id": target.id,
+                    "emoji": emoji,
+                    "from": "customer",
+                })
+        return
+
+    message = value.get("message")
+    if not message:
+        return  # outros eventos (read receipt, postback, etc.) não tratados por ora
+
+    # Eco de mensagem enviada pelo próprio app (via API ou Instagram Direct) — ignora
+    if message.get("is_echo"):
+        return
+
     message_id = message.get("mid", "")
+    message_text = message.get("text")
 
-    # Ignora eco de mensagens enviadas pelo próprio app
-    if value.get("sender", {}).get("id") == value.get("recipient", {}).get("id"):
-        return
+    # Mídia recebida — a Instagram Messaging API já devolve uma URL pública
+    # (temporária), sem exigir Bearer token como o WhatsApp Cloud API.
+    media_type: str | None = None
+    media_url: str | None = None
+    attachments = message.get("attachments") or []
+    if attachments:
+        att = attachments[0]
+        att_type = att.get("type")
+        att_url = att.get("payload", {}).get("url")
+        if att_type in ("image", "video", "audio"):
+            media_type, media_url = att_type, att_url
+        elif att_type == "file":
+            media_type, media_url = "document", att_url
+        elif not message_text:
+            # share/story_mention/reel etc. sem preview tratável — vira texto com link
+            message_text = f"[{att_type or 'anexo'}] {att_url or ''}".strip()
 
-    if not sender_id:
-        return
+    # Quote: cliente respondeu citando uma mensagem anterior
+    context_text: str | None = None
+    reply_to_mid = message.get("reply_to", {}).get("mid")
+    if reply_to_mid:
+        result = await db.execute(
+            select(Message).where(Message.message_id == reply_to_mid, Message.tenant_id == tenant_id)
+        )
+        quoted = result.scalar_one_or_none()
+        if quoted:
+            context_text = quoted.text or f"[{quoted.media_type or 'mídia'}]"
 
-    # Salva o lead (upsert — mesma pessoa pode mandar vários DMs)
-    existing = await _find_lead(account.id, sender_id, db)
-    if not existing:
+    # Upsert lead (PSID como handle externo — nome real pode ser buscado depois)
+    lead = await _find_lead(tenant_id, sender_id, db)
+    if not lead:
         lead = Lead(
-            account_id=account.id,
-            instagram_handle=sender_id,  # PSID; handle real pode ser buscado depois
+            id=str(uuid.uuid4()),
+            account_id=tenant_id,
+            instagram_handle=sender_id,
+            name=sender_id,
             source=LeadSource.INSTAGRAM_DM,
             status=LeadStatus.NEW,
             metadata_json=json.dumps({"first_message": message_text}),
         )
         db.add(lead)
-        logger.info("Novo lead (DM): %s | conta %s", sender_id, account.id)
+        logger.info("Novo lead (DM): %s | conta %s", sender_id, tenant_id)
+        await db.flush()
 
-    # Verifica automações e responde
-    if message_text:
-        matched = await _match_automation(account.id, message_text, db, channel="dm")
+    conv = await _get_or_create_conversation(tenant_id, lead.id, "instagram", db)
+
+    msg = Message(
+        tenant_id=tenant_id,
+        conversation_id=conv.id,
+        sender=sender_id,
+        text=message_text,
+        direction="inbound",
+        wa_id=sender_id,
+        status="delivered",
+        message_id=message_id,
+        media_type=media_type,
+        media_url=media_url,
+        context_text=context_text,
+        payload=message,
+        is_within_24h_window=True,
+    )
+    db.add(msg)
+
+    conv.unread_count = (conv.unread_count or 0) + 1
+    conv.last_updated = datetime.now(timezone.utc)
+    conv.atendimento_status = "aberto"
+    await db.flush()
+    await db.refresh(msg)
+
+    await ws_manager.broadcast(tenant_id, "new_message", {
+        "id": msg.id,
+        "conversation_id": conv.id,
+        "wa_id": sender_id,
+        "sender": sender_id,
+        "text": message_text,
+        "media_type": media_type,
+        "media_url": media_url,
+        "context_text": context_text,
+        "direction": "inbound",
+        "status": "delivered",
+        "message_id": message_id,
+        "created_at": msg.created_at.isoformat(),
+    })
+    await ws_manager.broadcast(tenant_id, "conversation_updated", {
+        "id": conv.id,
+        "unread_count": conv.unread_count,
+        "atendimento_status": conv.atendimento_status,
+        "last_updated": conv.last_updated.isoformat(),
+    })
+
+    # Auto-reply por keyword (se configurado e bot ativo na conversa)
+    if message_text and conv.bot_active:
+        matched = await _match_automation(tenant_id, message_text, db, channel="dm")
         if matched:
             token = await _get_token(account, db)
             if token:
                 try:
-                    await instagram_service.send_dm(token, sender_id, matched.auto_reply_message)
+                    resp = await instagram_service.send_dm(token, sender_id, matched.auto_reply_message)
+                    bot_mid = resp.get("message_id")
+                    bot_msg = Message(
+                        tenant_id=tenant_id,
+                        conversation_id=conv.id,
+                        sender="bot",
+                        text=matched.auto_reply_message,
+                        direction="outbound",
+                        wa_id=sender_id,
+                        status="sent",
+                        message_id=bot_mid,
+                        is_within_24h_window=True,
+                    )
+                    db.add(bot_msg)
+                    await db.flush()
+                    await ws_manager.broadcast(tenant_id, "new_message", {
+                        "id": bot_msg.id,
+                        "conversation_id": conv.id,
+                        "sender": "bot",
+                        "text": matched.auto_reply_message,
+                        "direction": "outbound",
+                        "wa_id": sender_id,
+                        "status": "sent",
+                        "created_at": bot_msg.created_at.isoformat(),
+                    })
                     logger.info("Auto-reply DM enviado para %s", sender_id)
                 except Exception as exc:
                     logger.warning("Falha no auto-reply de DM: %s", exc)
 
-    await dispatch_event("ig_dm", account.id, value)
+    await dispatch_event("ig_dm", tenant_id, value)
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +563,7 @@ async def handle_whatsapp_message(
             lead.phone = normalized_phone
 
         # Find or create conversation for this wa_id
-        conv = await _get_or_create_wpp_conversation(tenant_id, lead.id, db)
+        conv = await _get_or_create_conversation(tenant_id, lead.id, "whatsapp", db)
 
         # Save message
         payload_data = dict(msg_data)
@@ -577,14 +711,15 @@ async def _resolve_wpp_tenant(
     return conn, acc_result.scalar_one_or_none()
 
 
-async def _get_or_create_wpp_conversation(
-    tenant_id: str, customer_id: str, db: AsyncSession
+async def _get_or_create_conversation(
+    tenant_id: str, customer_id: str, channel: str, db: AsyncSession
 ) -> Conversation:
-    """Return existing open conversation for this customer or create a new one."""
+    """Return existing open conversation for this customer+channel or create a new one."""
     result = await db.execute(
         select(Conversation).where(
             Conversation.tenant_id == tenant_id,
             Conversation.customer_id == customer_id,
+            Conversation.channel == channel,
             Conversation.status == "active",
         ).order_by(Conversation.last_updated.desc()).limit(1)
     )
@@ -595,6 +730,7 @@ async def _get_or_create_wpp_conversation(
         id=str(uuid.uuid4()),
         tenant_id=tenant_id,
         customer_id=customer_id,
+        channel=channel,
         atendimento_status="aberto",
         status="active",
         unread_count=0,
@@ -605,13 +741,25 @@ async def _get_or_create_wpp_conversation(
 
 
 async def _resolve_tenant_by_page_id(page_id: str, db: AsyncSession) -> Account | None:
+    """
+    Resolve o tenant a partir do entry.id do webhook. Esse ID varia conforme
+    o fluxo de conexão: Facebook Login for Business manda o Page ID
+    (MetaConnection.page_id); Instagram Login (fluxo ativo hoje) manda o
+    ID da conta Instagram (MetaConnection.ig_business_account_id) — por
+    isso checamos as duas colunas.
+    """
     result = await db.execute(select(Account).where(Account.meta_page_id == page_id))
     account = result.scalar_one_or_none()
     if account:
         return account
 
     conn_result = await db.execute(
-        select(MetaConnection).where(MetaConnection.page_id == page_id)
+        select(MetaConnection).where(
+            or_(
+                MetaConnection.page_id == page_id,
+                MetaConnection.ig_business_account_id == page_id,
+            )
+        )
     )
     connection = conn_result.scalar_one_or_none()
     if connection:

@@ -219,7 +219,9 @@ export default function WhatsApp() {
 
   const loadConvs = useCallback(async () => {
     try {
-      const { data } = await api.get('/conversations', { params: { status: 'active', limit: 200 } })
+      const { data } = await api.get('/conversations', {
+        params: { status: 'active', channel: 'whatsapp', limit: 200 },
+      })
       setConvs(data)
     } catch { /* ignore */ }
   }, [])

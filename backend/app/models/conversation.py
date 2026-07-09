@@ -22,6 +22,8 @@ class Conversation(Base):
     atendente_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # "whatsapp" | "instagram" — de qual canal veio a conversa
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, default="whatsapp")
     # "aberto" | "em_atendimento" | "resolvido" | "aguardando"
     atendimento_status: Mapped[str] = mapped_column(String(50), nullable=False, default="aberto")
     # "active" | "closed"
@@ -41,4 +43,5 @@ class Conversation(Base):
     __table_args__ = (
         Index("ix_conv_tenant_status", "tenant_id", "status"),
         Index("ix_conv_tenant_atendente", "tenant_id", "atendente_id"),
+        Index("ix_conv_tenant_channel", "tenant_id", "channel"),
     )

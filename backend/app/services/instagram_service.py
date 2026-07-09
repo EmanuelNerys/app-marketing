@@ -48,6 +48,23 @@ class TokenExpiredError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Webhooks
+# ---------------------------------------------------------------------------
+
+async def subscribe_webhooks(token: str, ig_user_id: str) -> dict:
+    """
+    Inscreve a conta Instagram para receber webhooks de comentários e
+    mensagens neste app (obrigatório após o login — a Meta não inscreve
+    automaticamente, mesmo no fluxo de Instagram Login).
+    """
+    return await _request(
+        "POST",
+        f"{settings.ig_graph_url}/{ig_user_id}/subscribed_apps",
+        params={"access_token": token, "subscribed_fields": "comments,messages"},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Direct Messages (IG Messaging API)
 # ---------------------------------------------------------------------------
 
@@ -58,6 +75,16 @@ async def send_dm(token: str, recipient_id: str, message: str) -> dict:
         f"{settings.ig_graph_url}/me/messages",
         params={"access_token": token},
         json={"recipient": {"id": recipient_id}, "message": {"text": message}},
+    )
+
+
+async def mark_seen(token: str, recipient_id: str) -> dict:
+    """Marca as mensagens do usuário como lidas (ticks azuis no Instagram Direct)."""
+    return await _request(
+        "POST",
+        f"{settings.ig_graph_url}/me/messages",
+        params={"access_token": token},
+        json={"recipient": {"id": recipient_id}, "sender_action": "mark_seen"},
     )
 
 
