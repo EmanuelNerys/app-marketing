@@ -38,6 +38,7 @@ class CampaignCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     objective: str = Field(default="OUTCOME_LEADS")
     status: str = Field(default="PAUSED")
+    is_adset_budget_sharing_enabled: bool = Field(default=False)
 
 
 class CampaignUpdate(BaseModel):
@@ -280,7 +281,10 @@ async def api_create_campaign(
 ):
     conn, token = await _get_ads_connection(current_user, db)
     ad_account_id = _require_ad_account(conn)
-    result = await ads_service.create_campaign(token, ad_account_id, body.name, body.objective, body.status)
+    result = await ads_service.create_campaign(
+        token, ad_account_id, body.name, body.objective, body.status,
+        is_adset_budget_sharing_enabled=body.is_adset_budget_sharing_enabled,
+    )
     if "id" not in result:
         raise HTTPException(status_code=400, detail=f"Erro ao criar campanha: {result}")
     return {"success": True, "campaign_id": result["id"]}

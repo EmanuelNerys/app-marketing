@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import { Camera, MessageSquare, UserCheck } from 'lucide-react'
 import api from '../services/api'
 
-type Tab = 'publish' | 'scheduled' | 'media'
+type Tab = 'publish' | 'scheduled' | 'media' | 'automations'
 
 interface Schedule {
   id: string
@@ -29,6 +30,20 @@ interface MediaItem {
   like_count: number
   comments_count: number
 }
+
+interface AutomationConfig {
+  id: string
+  keyword: string
+  auto_reply_message: string
+  media_id: string | null
+  comment_reply_message: string | null
+  dm_message: string | null
+  link_message: string | null
+  handoff_to_human: boolean
+  is_active: boolean
+}
+
+const emptyAutomationForm = { keyword: '', auto_reply_message: '', handoff_to_human: false }
 
 export default function PublicarInstagram() {
   const [tab, setTab] = useState<Tab>('publish')
@@ -59,10 +74,16 @@ export default function PublicarInstagram() {
   const [loadingInsights, setLoadingInsights] = useState(false)
   const [stories, setStories] = useState<any[]>([])
   const [loadingStories, setLoadingStories] = useState(false)
+  const [automations, setAutomations] = useState<AutomationConfig[]>([])
+  const [loadingAutomations, setLoadingAutomations] = useState(false)
+  const [automationForm, setAutomationForm] = useState(emptyAutomationForm)
+  const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null)
+  const [savingAutomation, setSavingAutomation] = useState(false)
 
   useEffect(() => {
     if (tab === 'scheduled') loadSchedules()
     if (tab === 'media') { loadMedia(); loadInsights(); loadStories() }
+    if (tab === 'automations') { loadAutomations(); loadMedia() }
   }, [tab])
 
   useEffect(() => {
@@ -188,6 +209,57 @@ export default function PublicarInstagram() {
     } catch {} finally { setLoadingStories(false) }
   }
 
+  async function loadAutomations() {
+    setLoadingAutomations(true)
+    try {
+      const res = await api.get<AutomationConfig[]>('/automations')
+      setAutomations(res.data)
+    } catch {
+      setError('Não foi possível carregar as automações.')
+    } finally { setLoadingAutomations(false) }
+  }
+
+  function startAutomationEdit(automation?: AutomationConfig) {
+    setEditingAutomationId(automation?.id ?? null)
+    setAutomationForm(automation ? {
+      keyword: automation.keyword,
+      auto_reply_message: automation.auto_reply_message,
+      handoff_to_human: automation.handoff_to_human,
+    } : emptyAutomationForm)
+  }
+
+  async function saveAutomation(e: React.FormEvent) {
+    e.preventDefault()
+    if (!automationForm.keyword.trim() || !automationForm.auto_reply_message.trim()) return
+    setSavingAutomation(true); setError(''); setSuccess('')
+    const payload = { ...automationForm, keyword: automationForm.keyword.trim(), trigger_type: 'dm', is_active: true }
+    try {
+      if (editingAutomationId) await api.put(`/automations/${editingAutomationId}`, payload)
+      else await api.post('/automations', payload)
+      startAutomationEdit()
+      setSuccess('Automação salva com sucesso!')
+      loadAutomations()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Erro ao salvar automação.')
+    } finally { setSavingAutomation(false) }
+  }
+
+  async function toggleAutomation(automation: AutomationConfig) {
+    try {
+      await api.put(`/automations/${automation.id}`, { is_active: !automation.is_active })
+      loadAutomations()
+    } catch { setError('Erro ao atualizar automação.') }
+  }
+
+  async function deleteAutomation(id: string) {
+    if (!confirm('Remover esta automação?')) return
+    try {
+      await api.delete(`/automations/${id}`)
+      if (editingAutomationId === id) startAutomationEdit()
+      loadAutomations()
+    } catch { setError('Erro ao remover automação.') }
+  }
+
   async function handlePublishNow(id: string) {
     try {
       await api.post(`/instagram/schedule/${id}/publish-now`)
@@ -218,10 +290,10 @@ export default function PublicarInstagram() {
       <p className="text-[#555] text-sm mb-6">Publique imagens, vídeos e Reels diretamente no Instagram.</p>
 
       <div className="flex gap-1 mb-6 bg-[#111118] rounded-lg p-1 border border-white/[0.06] w-fit">
-        {(['publish', 'scheduled', 'media'] as Tab[]).map(t => (
+        {(['publish', 'scheduled', 'media', 'automations'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-indigo-600 text-white' : 'text-[#666] hover:text-[#e2e2e8]'}`}>
-            {t === 'publish' ? 'Publicar' : t === 'scheduled' ? 'Agendados' : 'Mídias & Métricas'}
+            {t === 'publish' ? 'Publicar' : t === 'scheduled' ? 'Agendados' : t === 'media' ? 'Mídias & Métricas' : 'Automações'}
           </button>
         ))}
       </div>
@@ -411,6 +483,47 @@ export default function PublicarInstagram() {
         </div>
       )}
 
+      {tab === 'automations' && (
+        <div className="grid lg:grid-cols-2 gap-6 max-w-5xl">
+          <form onSubmit={saveAutomation} className="bg-[#111118] rounded-xl border border-white/[0.06] p-6 h-fit space-y-4">
+            <div>
+              <h3 className="text-[#e2e2e8] font-semibold text-sm flex items-center gap-2"><MessageSquare size={15} className="text-emerald-400" /> Bot de mensagens</h3>
+              <p className="text-[#555] text-xs mt-1">Responda automaticamente palavras-chave recebidas pelo Direct ou WhatsApp.</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#666] mb-1">Palavra-chave</label>
+              <input required value={automationForm.keyword} onChange={e => setAutomationForm({ ...automationForm, keyword: e.target.value })} placeholder="Ex.: PREÇO"
+                className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#666] mb-1">Resposta automática</label>
+              <textarea required rows={3} value={automationForm.auto_reply_message} onChange={e => setAutomationForm({ ...automationForm, auto_reply_message: e.target.value })} placeholder="Olá {{primeiro_nome}}! Como posso ajudar?"
+                className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] rounded-lg text-sm resize-none focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <label className="flex items-center gap-2.5 cursor-pointer text-sm text-[#c0c0d0]">
+              <input type="checkbox" checked={automationForm.handoff_to_human} onChange={e => setAutomationForm({ ...automationForm, handoff_to_human: e.target.checked })} className="accent-indigo-500" />
+              <UserCheck size={14} className="text-amber-400" /> Passar para atendente após responder
+            </label>
+            <div className="flex gap-3">
+              <button disabled={savingAutomation} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded-lg text-sm">{savingAutomation ? 'Salvando...' : editingAutomationId ? 'Salvar alterações' : 'Criar bot'}</button>
+              {editingAutomationId && <button type="button" onClick={() => startAutomationEdit()} className="px-4 py-2.5 border border-white/[0.08] text-[#888] rounded-lg text-sm">Cancelar</button>}
+            </div>
+          </form>
+
+          <div className="space-y-6">
+            <section>
+              <h3 className="text-[#e2e2e8] font-semibold text-sm mb-3 flex items-center gap-2"><MessageSquare size={15} className="text-emerald-400" /> Bots de mensagem</h3>
+              <AutomationList items={automations.filter(a => !a.media_id)} loading={loadingAutomations} onEdit={startAutomationEdit} onToggle={toggleAutomation} onDelete={deleteAutomation} />
+            </section>
+            <section>
+              <h3 className="text-[#e2e2e8] font-semibold text-sm mb-3 flex items-center gap-2"><Camera size={15} className="text-pink-400" /> Funis por post</h3>
+              <p className="text-[#555] text-xs mb-3">Criados no formulário Publicar; veja a mídia e a palavra-chave de cada funil.</p>
+              <AutomationList items={automations.filter(a => !!a.media_id)} loading={loadingAutomations} media={mediaList} onToggle={toggleAutomation} onDelete={deleteAutomation} />
+            </section>
+          </div>
+        </div>
+      )}
+
       {tab === 'media' && (
         <div className="space-y-6">
           {loadingInsights ? (
@@ -512,4 +625,50 @@ export default function PublicarInstagram() {
       )}
     </div>
   )
+}
+
+function AutomationList({
+  items,
+  loading,
+  media = [],
+  onEdit,
+  onToggle,
+  onDelete,
+}: {
+  items: AutomationConfig[]
+  loading: boolean
+  media?: MediaItem[]
+  onEdit?: (automation: AutomationConfig) => void
+  onToggle: (automation: AutomationConfig) => void
+  onDelete: (id: string) => void
+}) {
+  if (loading) return <p className="text-[#555] text-sm">Carregando...</p>
+  if (!items.length) return <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-5 text-center text-[#555] text-sm">Nenhuma automação criada.</div>
+
+  return <div className="space-y-2.5">
+    {items.map(automation => {
+      const post = media.find(item => item.id === automation.media_id)
+      return <div key={automation.id} className="bg-[#111118] rounded-xl border border-white/[0.06] p-3.5 flex gap-3">
+        {automation.media_id && (
+          post?.thumbnail_url || post?.media_url
+            ? <img src={post.thumbnail_url || post.media_url || undefined} alt="Post vinculado" className="w-14 h-14 rounded-lg object-cover shrink-0" />
+            : <div className="w-14 h-14 rounded-lg bg-pink-500/10 text-pink-300 flex items-center justify-center shrink-0"><Camera size={16} /></div>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-[#e2e2e8]">“{automation.keyword}”</span>
+            {automation.media_id && <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-900/30 text-pink-300">post específico</span>}
+            <span className={`text-[11px] ${automation.is_active ? 'text-green-400' : 'text-[#555]'}`}>{automation.is_active ? 'Ativa' : 'Pausada'}</span>
+          </div>
+          <p className="text-[#888] text-xs mt-1 truncate">{automation.dm_message || automation.auto_reply_message}</p>
+          {post?.caption && <p className="text-[#555] text-[11px] mt-1 truncate">Post: {post.caption}</p>}
+        </div>
+        <div className="flex gap-1.5 shrink-0 self-start">
+          <button onClick={() => onToggle(automation)} className="px-2 py-1.5 bg-white/[0.04] hover:bg-white/[0.08] text-[#888] rounded-md text-[11px]">{automation.is_active ? 'Pausar' : 'Ativar'}</button>
+          {onEdit && <button onClick={() => onEdit(automation)} className="px-2 py-1.5 bg-indigo-600/20 text-indigo-300 rounded-md text-[11px]">Editar</button>}
+          <button onClick={() => onDelete(automation.id)} className="px-2 py-1.5 bg-red-900/20 text-red-400 rounded-md text-[11px]">Remover</button>
+        </div>
+      </div>
+    })}
+  </div>
 }

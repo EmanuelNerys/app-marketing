@@ -5,10 +5,8 @@ import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
 import ConexaoMeta from './pages/ConexaoMeta'
-import Automacao from './pages/Automacao'
 import Leads from './pages/Leads'
 import Configuracoes from './pages/Configuracoes'
-import Studio from './pages/Studio'
 import PublicarInstagram from './pages/PublicarInstagram'
 import Privacy from './pages/Privacy'
 import Pricing from './pages/Pricing'
@@ -42,9 +40,7 @@ export default function App() {
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route element={<Layout />}>
           <Route path="/app" element={<Dashboard />} />
-          <Route path="/app/studio" element={<Studio />} />
           <Route path="/app/conexao" element={<ConexaoMeta />} />
-          <Route path="/app/automacao" element={<Automacao />} />
           <Route path="/app/publicar" element={<PublicarInstagram />} />
           <Route path="/app/whatsapp" element={<WhatsApp />} />
           <Route path="/app/instagram-dm" element={<InstagramInbox />} />

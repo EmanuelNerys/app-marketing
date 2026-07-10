@@ -81,6 +81,7 @@ async def create_campaign(
     objective: str,
     status: str = "PAUSED",
     special_ad_categories: list[str] | None = None,
+    is_adset_budget_sharing_enabled: bool = False,
 ) -> dict:
     """
     Create a campaign.
@@ -93,6 +94,7 @@ async def create_campaign(
         "objective": objective,
         "status": status,
         "special_ad_categories": special_ad_categories or [],
+        "is_adset_budget_sharing_enabled": is_adset_budget_sharing_enabled,
     }
     return await _request(
         "POST",

@@ -100,6 +100,7 @@ async def test_create_campaign_uses_active_ad_account(client, db_session):
     assert resp.json()["campaign_id"] == "CAMP_1"
     mock_create.assert_called_once()
     assert mock_create.call_args[0][1] == "act_111"
+    assert mock_create.call_args.kwargs["is_adset_budget_sharing_enabled"] is False
 
 
 @pytest.mark.asyncio

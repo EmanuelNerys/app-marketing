@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Clapperboard, Megaphone, Link2, Send,
-  Zap, Users, Settings, CreditCard, Building2, LogOut,
+  Users, Settings, CreditCard, Building2, LogOut,
   ChevronRight, ChevronDown, MessageSquare, FileText, Clock,
   Headphones, Camera,
   type LucideIcon,
@@ -55,10 +55,8 @@ export default function Sidebar() {
       label: 'Instagram',
       icon: Camera,
       items: [
-        { to: '/app/studio', label: 'Studio de Criação', icon: Clapperboard },
-        { to: '/app/publicar', label: 'Publicar', icon: Send },
+        { to: '/app/publicar', label: 'Publicar & Automação', icon: Send },
         { to: '/app/instagram-dm', label: 'Direct', icon: MessageSquare },
-        { to: '/app/automacao', label: 'Automação', icon: Zap },
       ],
     },
     {
