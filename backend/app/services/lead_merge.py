@@ -101,19 +101,12 @@ async def merge_leads(survivor: Lead, absorbed: Lead, db: AsyncSession) -> Lead:
     return survivor
 
 
-async def auto_merge_by_phone(lead: Lead, db: AsyncSession) -> Lead:
-    """
-    Se outro lead da mesma conta tiver o MESMO telefone, funde os dois
-    automaticamente. Mantém o lead mais antigo como sobrevivente. Retorna o
-    sobrevivente (pode ser diferente do lead recebido).
-    """
-    if not lead.phone:
-        return lead
-
+async def _auto_merge_by_column(lead: Lead, column, value: str, db: AsyncSession) -> Lead:
+    """Funde `lead` com qualquer outro da conta cujo `column` == value (mais antigo sobrevive)."""
     result = await db.execute(
         select(Lead).where(
             Lead.account_id == lead.account_id,
-            Lead.phone == lead.phone,
+            column == value,
             Lead.id != lead.id,
         )
     )
@@ -126,3 +119,21 @@ async def auto_merge_by_phone(lead: Lead, db: AsyncSession) -> Lead:
         else:
             survivor = await merge_leads(other, survivor, db)
     return survivor
+
+
+async def auto_merge_by_phone(lead: Lead, db: AsyncSession) -> Lead:
+    """
+    Se outro lead da mesma conta tiver o MESMO telefone, funde os dois
+    automaticamente. Mantém o lead mais antigo como sobrevivente. Retorna o
+    sobrevivente (pode ser diferente do lead recebido).
+    """
+    if not lead.phone:
+        return lead
+    return await _auto_merge_by_column(lead, Lead.phone, lead.phone, db)
+
+
+async def auto_merge_by_email(lead: Lead, db: AsyncSession) -> Lead:
+    """Idem auto_merge_by_phone, mas usando o email como chave de junção."""
+    if not lead.email:
+        return lead
+    return await _auto_merge_by_column(lead, Lead.email, lead.email, db)

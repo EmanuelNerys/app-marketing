@@ -211,6 +211,27 @@ async def test_comment_without_post_scope_is_ignored(client, db_session, _mock_i
 
 
 @pytest.mark.asyncio
+async def test_self_comment_is_ignored_no_loop(client, db_session, _mock_ig):
+    """
+    O comentário feito pela PRÓPRIA conta (ex: a resposta pública do bot) não
+    dispara a automação — senão, se a resposta contém a palavra-chave, o bot
+    reage à própria resposta e entra em loop infinito.
+    """
+    account = await _ig_tenant(db_session, "IG7")
+    db_session.add(AutomationConfig(
+        account_id=account.id, keyword="teste", trigger_type="comment", media_id="MEDIA_7",
+        auto_reply_message="x", comment_reply_message="teste resposta",
+        is_active=True,
+    ))
+    await db_session.flush()
+
+    with patch("app.services.instagram_service.reply_to_comment", new_callable=AsyncMock) as mock_reply:
+        # comentário cujo from.id == id da própria conta (IG7 = entry.id)
+        await _post(client, _comment("IG7", "MEDIA_7", "IG7", "teste resposta"))
+        mock_reply.assert_not_called()   # não reage ao próprio comentário
+
+
+@pytest.mark.asyncio
 async def test_wrong_post_does_not_trigger(client, db_session, _mock_ig):
     account = await _ig_tenant(db_session, "IG4")
     db_session.add(AutomationConfig(

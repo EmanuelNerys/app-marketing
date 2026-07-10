@@ -45,6 +45,9 @@ class Lead(Base):
     # vírgulas para casar com LIKE '%,id,%'. Permite que mensagens futuras
     # encontrem o lead unificado por qualquer um dos canais.
     alt_handles: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Atribuição: ID do anúncio que originou este lead (Click-to-WhatsApp,
+    # referral de DM ou formulário de Lead Ads). Permite medir leads por anúncio.
+    origin_ad_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     # Fluxo comentário→DM: mensagem (com link) a enviar quando a pessoa
     # responder à 1ª DM. Consumida e limpa no próximo DM recebido.
     pending_auto_message: Mapped[str | None] = mapped_column(Text, nullable=True)

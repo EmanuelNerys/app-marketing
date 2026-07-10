@@ -13,6 +13,7 @@ interface Lead {
   ig_user_id: string | null
   email: string | null
   phone: string | null
+  origin_ad_id: string | null
   source: string
   status: string
   score: number | null
@@ -405,9 +406,19 @@ export default function Leads() {
 
                   {/* Source */}
                   <td className="px-4 py-3.5">
-                    <span className="text-xs text-[#555]">
-                      {sourceLabel[lead.source] ?? lead.source}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs text-[#555]">
+                        {sourceLabel[lead.source] ?? lead.source}
+                      </span>
+                      {lead.origin_ad_id && (
+                        <span
+                          title={`Veio do anúncio ${lead.origin_ad_id}`}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/30 text-violet-300 border border-violet-500/20"
+                        >
+                          📣 Anúncio
+                        </span>
+                      )}
+                    </div>
                   </td>
 
                   {/* Score */}

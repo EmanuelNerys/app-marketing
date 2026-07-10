@@ -28,6 +28,18 @@ interface AdAccount {
   business_name: string | null
 }
 
+interface AdAttribution {
+  ad_id: string
+  ad_name: string | null
+  leads: number
+}
+
+interface AttributionSummary {
+  total_leads: number
+  leads_from_ads: number
+  by_ad: AdAttribution[]
+}
+
 const DATE_PRESETS: { value: string; label: string }[] = [
   { value: 'last_7d', label: '7 dias' },
   { value: 'last_30d', label: '30 dias' },
@@ -43,6 +55,7 @@ export default function Marketing() {
   const [accounts, setAccounts] = useState<AdAccount[]>([])
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null)
   const [switchingAccount, setSwitchingAccount] = useState(false)
+  const [attribution, setAttribution] = useState<AttributionSummary | null>(null)
 
   const [datePreset, setDatePreset] = useState('last_30d')
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null)
@@ -85,8 +98,16 @@ export default function Marketing() {
     }
   }, [])
 
+  const loadAttribution = useCallback(async () => {
+    try {
+      const { data } = await api.get<AttributionSummary>('/marketing/attribution')
+      setAttribution(data)
+    } catch { /* atribuição é enriquecimento — não bloqueia a tela */ }
+  }, [])
+
   useEffect(() => { loadAccounts() }, [loadAccounts])
   useEffect(() => { loadData(datePreset) }, [loadData, datePreset])
+  useEffect(() => { loadAttribution() }, [loadAttribution])
 
   async function handleSwitchAccount(id: string) {
     if (id === activeAccountId || switchingAccount) return
@@ -202,7 +223,7 @@ export default function Marketing() {
 
       {/* Insights */}
       {insights && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
           <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-4">
             <p className="text-[#555] text-xs mb-1">Gastos</p>
             <p className="text-xl font-bold text-[#e2e2e8]">R$ {insights.spend.toFixed(2)}</p>
@@ -222,6 +243,38 @@ export default function Marketing() {
           <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-4">
             <p className="text-[#555] text-xs mb-1">CPM</p>
             <p className="text-xl font-bold text-[#e2e2e8]">R$ {insights.cpm.toFixed(2)}</p>
+          </div>
+          <div className="bg-[#111118] rounded-xl border border-violet-500/20 p-4">
+            <p className="text-violet-300/70 text-xs mb-1">Leads de anúncios</p>
+            <p className="text-xl font-bold text-violet-300">{attribution?.leads_from_ads ?? 0}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Leads por anúncio — atribuição real (conversas/formulários, não cliques) */}
+      {attribution && attribution.by_ad.length > 0 && (
+        <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-5 mb-8 max-w-3xl">
+          <h3 className="text-sm font-semibold text-[#e2e2e8] mb-1">📣 Leads por anúncio</h3>
+          <p className="text-[#555] text-xs mb-4">
+            Leads que chegaram por Click-to-WhatsApp, Direct ou formulário — atribuídos ao anúncio de origem.
+          </p>
+          <div className="space-y-2">
+            {attribution.by_ad.map((a) => (
+              <div key={a.ad_id} className="flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] text-[#c0c0d0] truncate">{a.ad_name || `Anúncio ${a.ad_id}`}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="w-32 h-1.5 rounded-full bg-white/[0.05] overflow-hidden">
+                    <div
+                      className="h-full bg-violet-500 rounded-full"
+                      style={{ width: `${Math.max(8, (a.leads / attribution.by_ad[0].leads) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-[13px] font-semibold text-violet-300 w-8 text-right">{a.leads}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

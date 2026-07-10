@@ -329,6 +329,41 @@ async def delete_ad(token: str, ad_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Lead Ads (formulários instantâneos)
+# ---------------------------------------------------------------------------
+
+async def get_leadgen(token: str, leadgen_id: str) -> dict:
+    """
+    Busca os dados preenchidos de um lead de formulário (Lead Ads).
+    Requer a permissão leads_retrieval (App Review) em produção.
+    """
+    return await _request(
+        "GET",
+        f"{settings.meta_graph_url}/{leadgen_id}",
+        params={
+            "access_token": token,
+            "fields": "id,ad_id,form_id,created_time,field_data",
+        },
+    )
+
+
+async def get_ad_names(token: str, ad_ids: list[str]) -> dict[str, str]:
+    """Resolve nomes de anúncios em lote (uma única chamada via ?ids=)."""
+    if not ad_ids:
+        return {}
+    data = await _request(
+        "GET",
+        f"{settings.meta_graph_url}/",
+        params={"access_token": token, "ids": ",".join(ad_ids), "fields": "name"},
+    )
+    return {
+        k: v.get("name", k)
+        for k, v in data.items()
+        if isinstance(v, dict) and not v.get("error")
+    }
+
+
+# ---------------------------------------------------------------------------
 # Targeting search (autocomplete de interesses e localizações)
 # ---------------------------------------------------------------------------
 

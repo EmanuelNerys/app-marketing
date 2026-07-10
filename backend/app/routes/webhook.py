@@ -19,11 +19,14 @@ from app.core.phone import normalize_phone
 from app.models.account import Account
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.automation import AutomationConfig
-from app.models.meta_connection import MetaConnection, PROVIDER_INSTAGRAM, PROVIDER_WHATSAPP, STATUS_ACTIVE
+from app.models.meta_connection import (
+    MetaConnection, PROVIDER_INSTAGRAM, PROVIDER_WHATSAPP, PROVIDER_ADS, STATUS_ACTIVE,
+)
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services import instagram_service
 from app.services.lead_merge import auto_merge_by_phone
+from app.services.lead_identity import resolve_or_create_lead
 from app.services.meta_token_service import safe_decrypt_token, decrypt_token
 
 logger = logging.getLogger(__name__)
@@ -109,7 +112,7 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
                 if not account:
                     logger.warning("No IG tenant for page_id=%s", entry_id)
                     continue
-                await _route_change(field, value, account, db)
+                await _route_change(field, value, account, db, self_id=entry_id)
 
         # Formato 2: entry[].messaging[] — DMs do Instagram (Messenger Platform).
         # Cada item já é o "value" (sender/recipient/message ou reaction), sem
@@ -130,9 +133,11 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 # Event routing
 # ---------------------------------------------------------------------------
 
-async def _route_change(field: str, value: dict, account: Account, db: AsyncSession):
+async def _route_change(field: str, value: dict, account: Account, db: AsyncSession, self_id: str = ""):
     if field == "comments":
-        await handle_ig_comment(account, value, db)
+        await handle_ig_comment(account, value, db, self_id=self_id)
+    elif field == "leadgen":
+        await handle_leadgen(account, value, db)
     elif field == "messaging":
         await handle_ig_dm(account, value, db)
     elif field == "messages":
@@ -140,6 +145,86 @@ async def _route_change(field: str, value: dict, account: Account, db: AsyncSess
         await handle_whatsapp_message(account, value, db)
     else:
         logger.debug("Unhandled webhook field '%s' for account %s", field, account.id)
+
+
+# ---------------------------------------------------------------------------
+# Lead Ads (formulários instantâneos) — field == "leadgen"
+# ---------------------------------------------------------------------------
+
+async def handle_leadgen(account: Account, value: dict, db: AsyncSession):
+    """
+    Payload: {"leadgen_id": ..., "page_id": ..., "form_id": ..., "ad_id": ...}.
+    Busca os dados preenchidos (nome/email/telefone) na Graph API e passa pelo
+    resolvedor de identidade — se a pessoa já falou por WhatsApp/Instagram,
+    o formulário completa o lead existente em vez de criar um duplicado.
+    """
+    leadgen_id = value.get("leadgen_id")
+    if not leadgen_id:
+        return
+
+    token = await _get_ads_or_page_token(account, db)
+    if not token:
+        logger.warning("Leadgen %s ignorado: nenhum token disponível", leadgen_id)
+        return
+
+    from app.services import ads_service
+    try:
+        data = await ads_service.get_leadgen(token, leadgen_id)
+    except Exception as exc:
+        logger.warning("Falha ao buscar leadgen %s: %s", leadgen_id, exc)
+        return
+    if data.get("error"):
+        logger.warning("Leadgen %s retornou erro: %s", leadgen_id, data["error"])
+        return
+
+    # field_data: [{"name": "full_name", "values": ["Maria"]}, ...]
+    fields = {
+        f.get("name", ""): (f.get("values") or [""])[0]
+        for f in data.get("field_data", [])
+    }
+    name = fields.get("full_name") or fields.get("name") or fields.get("first_name")
+    email = fields.get("email")
+    phone = fields.get("phone_number") or fields.get("phone")
+
+    lead = await resolve_or_create_lead(
+        db, account.id,
+        phone=phone, email=email, name=name,
+        source=LeadSource.INSTAGRAM_FORM,
+        origin_ad_id=value.get("ad_id") or data.get("ad_id"),
+        metadata={"leadgen_id": leadgen_id, "form_id": value.get("form_id"),
+                  "form_fields": fields},
+    )
+    logger.info("Lead Ads capturado: %s → lead %s", name or email or phone, lead.id)
+    await dispatch_event("leadgen", account.id, value)
+
+
+async def _get_ads_or_page_token(account: Account, db: AsyncSession) -> str | None:
+    """Token para ler Lead Ads: tenta a conexão de Ads, depois o token de página."""
+    result = await db.execute(
+        select(MetaConnection).where(
+            MetaConnection.account_id == account.id,
+            MetaConnection.provider == PROVIDER_ADS,
+            MetaConnection.status == STATUS_ACTIVE,
+        )
+    )
+    conn = result.scalar_one_or_none()
+    if conn:
+        try:
+            return decrypt_token(conn.access_token_encrypted)
+        except Exception:
+            pass
+    return await _get_token(account, db)
+
+
+def _merge_lead_metadata(lead: Lead, extra: dict) -> None:
+    """Mescla chaves novas no metadata_json do lead sem sobrescrever existentes."""
+    try:
+        meta = json.loads(lead.metadata_json) if lead.metadata_json else {}
+    except (ValueError, TypeError):
+        meta = {}
+    for k, v in extra.items():
+        meta.setdefault(k, v)
+    lead.metadata_json = json.dumps(meta)
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +287,7 @@ async def _send_ig_bot_dm(token, tenant_id, conv, recipient_id, text, db) -> Non
 # Instagram comment handler — salva lead + auto-reply por keyword
 # ---------------------------------------------------------------------------
 
-async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
+async def handle_ig_comment(account: Account, value: dict, db: AsyncSession, self_id: str = ""):
     """
     Payload example:
     {
@@ -213,6 +298,13 @@ async def handle_ig_comment(account: Account, value: dict, db: AsyncSession):
     }
     """
     from_data = value.get("from", {})
+
+    # Ignora comentários feitos pela PRÓPRIA conta (ex: a resposta pública do
+    # bot). Sem isso, se a resposta contém a palavra-chave, o bot reage à
+    # própria resposta e entra em loop infinito.
+    if self_id and from_data.get("id") == self_id:
+        logger.debug("Comentário da própria conta (%s) ignorado — evita loop", self_id)
+        return
     # Chaveia o lead pelo IGSID (from.id) — o MESMO id que vem no DM (sender.id).
     # Assim, quando a pessoa comenta e depois responde no direto, é o mesmo lead
     # (o @username sozinho não casaria com o PSID do DM).
@@ -405,6 +497,17 @@ async def handle_ig_dm(account: Account, value: dict, db: AsyncSession):
         db.add(lead)
         logger.info("Novo lead (DM): %s (%s) | conta %s", display_name, sender_id, tenant_id)
         await db.flush()
+
+    # Atribuição de anúncio (Click-to-Instagram-Direct): o evento de messaging
+    # traz um objeto referral com o ad_id quando a conversa nasce de um anúncio.
+    ig_referral = value.get("referral") or (value.get("postback") or {}).get("referral")
+    if ig_referral and not lead.origin_ad_id:
+        ad_id = ig_referral.get("ad_id")
+        if ad_id:
+            lead.origin_ad_id = ad_id
+            _merge_lead_metadata(lead, {"ad_referral": ig_referral})
+            await db.flush()
+            logger.info("Lead %s atribuído ao anúncio %s (IG Direct)", lead.id, ad_id)
 
     conv = await _get_or_create_conversation(tenant_id, lead.id, "instagram", db)
 
@@ -733,6 +836,17 @@ async def handle_whatsapp_message(
         # (ex: a mesma pessoa que veio antes pelo Instagram e teve o número
         # preenchido), unifica os dois num só.
         lead = await auto_merge_by_phone(lead, db)
+
+        # Atribuição Click-to-WhatsApp: a mensagem que nasce de um anúncio traz
+        # o objeto referral (source_id = ID do anúncio, ctwa_clid, headline).
+        referral = msg_data.get("referral")
+        if referral and not lead.origin_ad_id:
+            ad_id = referral.get("source_id")
+            if ad_id:
+                lead.origin_ad_id = ad_id
+                _merge_lead_metadata(lead, {"ad_referral": referral})
+                await db.flush()
+                logger.info("Lead %s atribuído ao anúncio %s (CTWA)", lead.id, ad_id)
 
         # Find or create conversation for this wa_id
         conv = await _get_or_create_conversation(tenant_id, lead.id, "whatsapp", db)

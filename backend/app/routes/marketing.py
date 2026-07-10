@@ -4,11 +4,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
+from app.models.lead import Lead
 from app.models.meta_connection import MetaConnection, PROVIDER_ADS, STATUS_ACTIVE
 from app.services.meta_token_service import safe_decrypt_token
 from app.services import ads_service
@@ -607,3 +608,67 @@ async def api_insights(
     if not data:
         return AdInsightsOut()
     return _insights_row(data[0])
+
+
+# ---------------------------------------------------------------------------
+# Atribuição — leads gerados por anúncio (CTWA, IG Direct e Lead Ads)
+# ---------------------------------------------------------------------------
+
+class AdAttributionOut(BaseModel):
+    ad_id: str
+    ad_name: str | None = None
+    leads: int
+
+
+class AttributionSummaryOut(BaseModel):
+    total_leads: int
+    leads_from_ads: int
+    by_ad: list[AdAttributionOut]
+
+
+@router.get("/attribution", response_model=AttributionSummaryOut)
+async def api_attribution(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Quantos leads cada anúncio gerou — cruzando os leads capturados
+    (Click-to-WhatsApp, referral do Direct e formulários de Lead Ads) com o
+    ID do anúncio de origem. É o ROI real: conversas/leads, não cliques.
+    """
+    total = (await db.execute(
+        select(func.count(Lead.id)).where(Lead.account_id == current_user.tenant_id)
+    )).scalar() or 0
+
+    rows = (await db.execute(
+        select(Lead.origin_ad_id, func.count(Lead.id))
+        .where(
+            Lead.account_id == current_user.tenant_id,
+            Lead.origin_ad_id.isnot(None),
+        )
+        .group_by(Lead.origin_ad_id)
+        .order_by(func.count(Lead.id).desc())
+        .limit(50)
+    )).all()
+
+    # Enriquece com os nomes dos anúncios (melhor esforço — sem conexão de
+    # Ads ativa, mostra só o ID)
+    ad_names: dict[str, str] = {}
+    if rows:
+        try:
+            _, token = await _get_ads_connection(current_user, db)
+            ad_names = await ads_service.get_ad_names(token, [r[0] for r in rows])
+        except HTTPException:
+            pass
+        except Exception as exc:
+            logger.debug("Não foi possível resolver nomes de anúncios: %s", exc)
+
+    by_ad = [
+        AdAttributionOut(ad_id=ad_id, ad_name=ad_names.get(ad_id), leads=count)
+        for ad_id, count in rows
+    ]
+    return AttributionSummaryOut(
+        total_leads=total,
+        leads_from_ads=sum(a.leads for a in by_ad),
+        by_ad=by_ad,
+    )

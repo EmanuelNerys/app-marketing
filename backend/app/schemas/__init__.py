@@ -11,6 +11,7 @@ class LeadResponse(BaseModel):
     ig_user_id: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    origin_ad_id: Optional[str] = None
     source: str
     status: str
     score: Optional[int] = None

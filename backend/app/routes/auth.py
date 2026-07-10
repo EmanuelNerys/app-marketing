@@ -2,6 +2,7 @@ import logging
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import httpx
@@ -175,19 +176,16 @@ async def meta_callback(
     fb_user_name = me_data.get("name", "Unknown")
     pages = me_data.get("accounts", {}).get("data", [])
 
-    if not pages:
-        raise HTTPException(
-            status_code=400,
-            detail="Nenhuma Página do Facebook encontrada. Crie uma Página primeiro.",
-        )
-
-    page = pages[0]
-    page_id = page["id"]
-    page_name = page.get("name", "")
-    page_access_token = page.get("access_token", access_token)
+    # Página do Facebook é opcional para o provider "ads" (a Marketing API usa o
+    # token de usuário; a página só é necessária depois, ao criar criativos).
+    # Para os demais fluxos ela continua obrigatória — o erro é levantado adiante.
+    page = pages[0] if pages else None
+    page_id = page["id"] if page else None
+    page_name = page.get("name", "") if page else ""
+    page_access_token = page.get("access_token", access_token) if page else access_token
 
     ig_biz_id: str | None = None
-    if "instagram_business_account" in page:
+    if page and "instagram_business_account" in page:
         ig_biz_id = page["instagram_business_account"].get("id")
 
     # -----------------------------------------------------------------------
@@ -222,10 +220,27 @@ async def meta_callback(
 
         if provider == PROVIDER_ADS:
             ad_account_id = await _discover_ad_account(access_token, meta_user_id)
+            if not ad_account_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Nenhuma conta de anúncios encontrada para este usuário. "
+                        "Crie uma no Gerenciador de Anúncios da Meta primeiro."
+                    ),
+                )
         elif provider == PROVIDER_WHATSAPP:
             waba_id_val = await _discover_waba(access_token, meta_user_id)
 
-        encrypted_token = encrypt_token(page_access_token)
+        if provider != PROVIDER_ADS and not page:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhuma Página do Facebook encontrada. Crie uma Página primeiro.",
+            )
+
+        # Ads: a Marketing API é chamada com o token de USUÁRIO (o token da
+        # página não carrega as permissões ads_management/ads_read).
+        token_to_store = access_token if provider == PROVIDER_ADS else page_access_token
+        encrypted_token = encrypt_token(token_to_store)
         scopes_str = _PROVIDER_SCOPES.get(provider, "")
 
         if connection:
@@ -258,12 +273,11 @@ async def meta_callback(
         await db.flush()
         await db.refresh(account)
 
-        return MetaCallbackResponse(
-            success=True,
-            account_id=account.id,
-            brand_name=account.brand_name,
-            page_name=page_name,
-            onboarding_step=account.onboarding_step,
+        # Popup: redireciona para a página de sucesso do front, que avisa a
+        # janela principal via postMessage (OAUTH_SUCCESS) e se fecha sozinha.
+        return RedirectResponse(
+            url=f"{settings.app_url}/oauth/success?provider={provider}&username={page_name or ''}",
+            status_code=302,
         )
 
     # -----------------------------------------------------------------------

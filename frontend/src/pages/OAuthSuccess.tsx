@@ -13,10 +13,16 @@ export default function OAuthSuccess() {
         window.location.origin,
       )
     }
-    const igUrl = username
-      ? `https://www.instagram.com/${username}/`
-      : 'https://www.instagram.com/'
-    window.location.href = igUrl
+    if (provider === 'instagram') {
+      // Instagram: mostra o perfil conectado como confirmação visual
+      const igUrl = username
+        ? `https://www.instagram.com/${username}/`
+        : 'https://www.instagram.com/'
+      window.location.href = igUrl
+    } else {
+      // Ads/WhatsApp: fecha o popup — a janela principal mostra o modal de sucesso
+      window.close()
+    }
   }, [])
 
   return (

@@ -15,7 +15,7 @@ from app.models.user import User
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.schemas import LeadResponse, LeadUpdate
 from app.services.lead_scoring import score_lead
-from app.services.lead_merge import merge_leads, auto_merge_by_phone
+from app.services.lead_merge import merge_leads, auto_merge_by_phone, auto_merge_by_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/leads", tags=["leads"])
@@ -176,14 +176,18 @@ async def update_lead(
 
     updates = data.model_dump(exclude_unset=True)
     phone_changed = "phone" in updates and updates["phone"] and updates["phone"] != lead.phone
+    email_changed = "email" in updates and updates["email"] and updates["email"] != lead.email
     for field, value in updates.items():
         setattr(lead, field, value)
 
-    # Preencher o telefone pode revelar que este lead é a mesma pessoa de outro
-    # (ex: lead do Instagram que agora ganhou o número do WhatsApp) — unifica.
-    if phone_changed:
+    # Preencher telefone/email pode revelar que este lead é a mesma pessoa de
+    # outro (ex: lead do Instagram que agora ganhou o número do WhatsApp) — unifica.
+    if phone_changed or email_changed:
         await db.flush()
-        lead = await auto_merge_by_phone(lead, db)
+        if phone_changed:
+            lead = await auto_merge_by_phone(lead, db)
+        if email_changed:
+            lead = await auto_merge_by_email(lead, db)
 
     await score_lead(lead)
     await db.flush()
