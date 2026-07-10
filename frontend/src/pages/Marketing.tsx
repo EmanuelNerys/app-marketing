@@ -223,30 +223,30 @@ export default function Marketing() {
 
       {/* Insights */}
       {insights && (
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
-          <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-4">
-            <p className="text-[#555] text-xs mb-1">Gastos</p>
-            <p className="text-xl font-bold text-[#e2e2e8]">R$ {insights.spend.toFixed(2)}</p>
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
+          <div className="bg-gradient-to-br from-indigo-900/40 to-[#111118] rounded-2xl border border-indigo-500/20 p-5 shadow-lg shadow-indigo-900/10 transition-transform hover:-translate-y-1">
+            <p className="text-indigo-300 text-xs mb-1 font-medium">Gastos</p>
+            <p className="text-2xl font-bold text-white">R$ {insights.spend.toFixed(2)}</p>
           </div>
-          <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-4">
-            <p className="text-[#555] text-xs mb-1">Impressões</p>
-            <p className="text-xl font-bold text-[#e2e2e8]">{insights.impressions.toLocaleString()}</p>
+          <div className="bg-gradient-to-br from-emerald-900/40 to-[#111118] rounded-2xl border border-emerald-500/20 p-5 shadow-lg shadow-emerald-900/10 transition-transform hover:-translate-y-1">
+            <p className="text-emerald-300 text-xs mb-1 font-medium">Impressões</p>
+            <p className="text-2xl font-bold text-white">{insights.impressions.toLocaleString()}</p>
           </div>
-          <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-4">
-            <p className="text-[#555] text-xs mb-1">Cliques</p>
-            <p className="text-xl font-bold text-[#e2e2e8]">{insights.clicks.toLocaleString()}</p>
+          <div className="bg-gradient-to-br from-cyan-900/40 to-[#111118] rounded-2xl border border-cyan-500/20 p-5 shadow-lg shadow-cyan-900/10 transition-transform hover:-translate-y-1">
+            <p className="text-cyan-300 text-xs mb-1 font-medium">Cliques</p>
+            <p className="text-2xl font-bold text-white">{insights.clicks.toLocaleString()}</p>
           </div>
-          <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-4">
-            <p className="text-[#555] text-xs mb-1">CTR</p>
-            <p className="text-xl font-bold text-[#e2e2e8]">{insights.ctr.toFixed(2)}%</p>
+          <div className="bg-gradient-to-br from-blue-900/40 to-[#111118] rounded-2xl border border-blue-500/20 p-5 shadow-lg shadow-blue-900/10 transition-transform hover:-translate-y-1">
+            <p className="text-blue-300 text-xs mb-1 font-medium">CTR</p>
+            <p className="text-2xl font-bold text-white">{insights.ctr.toFixed(2)}%</p>
           </div>
-          <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-4">
-            <p className="text-[#555] text-xs mb-1">CPM</p>
-            <p className="text-xl font-bold text-[#e2e2e8]">R$ {insights.cpm.toFixed(2)}</p>
+          <div className="bg-gradient-to-br from-fuchsia-900/40 to-[#111118] rounded-2xl border border-fuchsia-500/20 p-5 shadow-lg shadow-fuchsia-900/10 transition-transform hover:-translate-y-1">
+            <p className="text-fuchsia-300 text-xs mb-1 font-medium">CPM</p>
+            <p className="text-2xl font-bold text-white">R$ {insights.cpm.toFixed(2)}</p>
           </div>
-          <div className="bg-[#111118] rounded-xl border border-violet-500/20 p-4">
-            <p className="text-violet-300/70 text-xs mb-1">Leads de anúncios</p>
-            <p className="text-xl font-bold text-violet-300">{attribution?.leads_from_ads ?? 0}</p>
+          <div className="bg-gradient-to-br from-violet-900/40 to-[#111118] rounded-2xl border border-violet-500/20 p-5 shadow-lg shadow-violet-900/10 transition-transform hover:-translate-y-1">
+            <p className="text-violet-300 text-xs mb-1 font-medium">Leads de anúncios</p>
+            <p className="text-2xl font-bold text-white">{attribution?.leads_from_ads ?? 0}</p>
           </div>
         </div>
       )}
@@ -280,52 +280,70 @@ export default function Marketing() {
       )}
 
       {/* Campanhas */}
-      <h3 className="text-lg font-semibold text-[#e2e2e8] mb-4">Campanhas</h3>
+      <h3 className="text-xl font-bold text-[#e2e2e8] mb-5">Suas Campanhas</h3>
       {loading ? (
-        <div className="text-[#555] text-sm">Carregando...</div>
+        <div className="flex justify-center py-10">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
+        </div>
       ) : campaigns.length === 0 ? (
-        <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-12 text-center">
-          <p className="text-[#555]">Nenhuma campanha ainda. Crie uma para começar.</p>
+        <div className="bg-[#111118]/80 backdrop-blur-md rounded-2xl border border-white/[0.06] p-16 text-center shadow-xl">
+          <div className="w-16 h-16 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Building2 size={32} className="text-indigo-400" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-2">Nenhuma campanha encontrada</h3>
+          <p className="text-[#888] text-sm">Crie sua primeira campanha para começar a escalar seus resultados.</p>
         </div>
       ) : (
-        <div className="grid gap-3 max-w-3xl">
+        <div className="grid gap-4 max-w-4xl">
           {campaigns.map((c) => {
             const busy = busyCampaignId === c.id
             return (
-              <div key={c.id} className="bg-[#111118] rounded-xl border border-white/[0.06] p-4 flex items-center gap-3">
-                <Link to={`/app/marketing/${c.id}`} className="flex-1 min-w-0 no-underline group">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-[#e2e2e8] font-semibold text-sm group-hover:text-indigo-300 transition-colors">
+              <div key={c.id} className="bg-[#111118]/80 backdrop-blur-sm rounded-2xl border border-white/[0.06] p-5 flex items-center gap-4 hover:bg-white/[0.02] hover:border-white/[0.1] transition-all group">
+                <Link to={`/app/marketing/${c.id}`} className="flex-1 min-w-0 no-underline">
+                  <div className="flex items-center gap-3">
+                    <h4 className="text-white font-semibold text-base group-hover:text-indigo-400 transition-colors">
                       {c.name}
                     </h4>
-                    <ChevronRight size={14} className="text-[#444] group-hover:text-indigo-300 transition-colors" />
+                    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 ${
+                      c.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-white/[0.05] text-[#888] border border-white/[0.05]'
+                    }`}>
+                      {c.status === 'ACTIVE' ? 'Ativa' : c.status === 'PAUSED' ? 'Pausada' : c.status}
+                    </span>
                   </div>
-                  <p className="text-[#555] text-xs mt-0.5">
-                    {objectiveLabels[c.objective] || c.objective}
-                    {c.daily_budget && ` · R$ ${(parseInt(c.daily_budget) / 100).toFixed(2)}/dia`}
-                  </p>
+                  <div className="flex items-center gap-4 mt-2">
+                    <p className="text-[#888] text-sm flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                      {objectiveLabels[c.objective] || c.objective}
+                    </p>
+                    {c.daily_budget && (
+                      <p className="text-[#888] text-sm flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        R$ {(parseInt(c.daily_budget) / 100).toFixed(2)}/dia
+                      </p>
+                    )}
+                  </div>
                 </Link>
-                <span className={`text-[11px] font-medium px-2 py-0.5 rounded shrink-0 ${
-                  c.status === 'ACTIVE' ? 'bg-green-900/20 text-green-400' : 'bg-white/[0.05] text-[#555]'
-                }`}>
-                  {c.status === 'ACTIVE' ? 'Ativa' : c.status === 'PAUSED' ? 'Pausada' : c.status}
-                </span>
-                <button
-                  onClick={() => toggleStatus(c)}
-                  disabled={busy}
-                  title={c.status === 'ACTIVE' ? 'Pausar' : 'Ativar'}
-                  className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-[#8a8a9e] hover:text-white flex items-center justify-center transition-colors disabled:opacity-40"
-                >
-                  {c.status === 'ACTIVE' ? <Pause size={14} /> : <Play size={14} />}
-                </button>
-                <button
-                  onClick={() => handleDelete(c)}
-                  disabled={busy}
-                  title="Excluir"
-                  className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-red-900/30 text-[#8a8a9e] hover:text-red-400 flex items-center justify-center transition-colors disabled:opacity-40"
-                >
-                  <Trash2 size={14} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => toggleStatus(c)}
+                    disabled={busy}
+                    title={c.status === 'ACTIVE' ? 'Pausar' : 'Ativar'}
+                    className="w-10 h-10 shrink-0 rounded-xl bg-white/[0.04] hover:bg-indigo-500/20 text-[#8a8a9e] hover:text-indigo-400 flex items-center justify-center transition-colors disabled:opacity-40"
+                  >
+                    {c.status === 'ACTIVE' ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-1" />}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(c)}
+                    disabled={busy}
+                    title="Excluir"
+                    className="w-10 h-10 shrink-0 rounded-xl bg-white/[0.04] hover:bg-red-500/20 text-[#8a8a9e] hover:text-red-400 flex items-center justify-center transition-colors disabled:opacity-40"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  <Link to={`/app/marketing/${c.id}`} className="w-10 h-10 shrink-0 rounded-xl bg-white/[0.04] hover:bg-white/[0.1] text-[#8a8a9e] hover:text-white flex items-center justify-center transition-colors">
+                     <ChevronRight size={20} />
+                  </Link>
+                </div>
               </div>
             )
           })}

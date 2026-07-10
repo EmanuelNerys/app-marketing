@@ -93,7 +93,7 @@ async def create_campaign(
         "name": name,
         "objective": objective,
         "status": status,
-        "special_ad_categories": special_ad_categories or [],
+        "special_ad_categories": special_ad_categories or ["NONE"],
         "is_adset_budget_sharing_enabled": is_adset_budget_sharing_enabled,
     }
     return await _request(

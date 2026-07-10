@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Camera, MessageSquare, UserCheck } from 'lucide-react'
 import api from '../services/api'
 
-type Tab = 'publish' | 'scheduled' | 'media' | 'automations'
+type Tab = 'publish_auto' | 'scheduled' | 'media'
 
 interface Schedule {
   id: string
@@ -46,7 +46,7 @@ interface AutomationConfig {
 const emptyAutomationForm = { keyword: '', auto_reply_message: '', handoff_to_human: false }
 
 export default function PublicarInstagram() {
-  const [tab, setTab] = useState<Tab>('publish')
+  const [tab, setTab] = useState<Tab>('publish_auto')
   const [igUserId, setIgUserId] = useState('')
   const [mediaUrl, setMediaUrl] = useState('')
   const [mediaType, setMediaType] = useState('IMAGE')
@@ -83,7 +83,7 @@ export default function PublicarInstagram() {
   useEffect(() => {
     if (tab === 'scheduled') loadSchedules()
     if (tab === 'media') { loadMedia(); loadInsights(); loadStories() }
-    if (tab === 'automations') { loadAutomations(); loadMedia() }
+    if (tab === 'publish_auto') { loadAutomations(); loadMedia() }
   }, [tab])
 
   useEffect(() => {
@@ -259,181 +259,6 @@ export default function PublicarInstagram() {
       loadAutomations()
     } catch { setError('Erro ao remover automação.') }
   }
-
-  async function handlePublishNow(id: string) {
-    try {
-      await api.post(`/instagram/schedule/${id}/publish-now`)
-      setSuccess('Publicado agora!')
-      loadSchedules()
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Erro ao publicar.')
-    }
-  }
-
-  async function handleDeleteSchedule(id: string) {
-    if (!confirm('Remover este agendamento?')) return
-    try {
-      await api.delete(`/instagram/schedule/${id}`)
-      loadSchedules()
-    } catch {}
-  }
-
-  const statusLabel: Record<string, { label: string; color: string }> = {
-    scheduled: { label: 'Agendado', color: 'text-blue-400' },
-    published: { label: 'Publicado', color: 'text-green-400' },
-    failed: { label: 'Falhou', color: 'text-red-400' },
-  }
-
-  return (
-    <div>
-      <h2 className="text-2xl font-bold text-[#e2e2e8] mb-2">Publicar no Instagram</h2>
-      <p className="text-[#555] text-sm mb-6">Publique imagens, vídeos e Reels diretamente no Instagram.</p>
-
-      <div className="flex gap-1 mb-6 bg-[#111118] rounded-lg p-1 border border-white/[0.06] w-fit">
-        {(['publish', 'scheduled', 'media', 'automations'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-indigo-600 text-white' : 'text-[#666] hover:text-[#e2e2e8]'}`}>
-            {t === 'publish' ? 'Publicar' : t === 'scheduled' ? 'Agendados' : t === 'media' ? 'Mídias & Métricas' : 'Automações'}
-          </button>
-        ))}
-      </div>
-
-      {error && <div className="mb-4 bg-red-900/20 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">{error}</div>}
-      {success && <div className="mb-4 bg-green-900/20 border border-green-500/20 text-green-400 text-sm rounded-lg px-4 py-3">{success}</div>}
-
-      {tab === 'publish' && (
-        <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-6 max-w-xl">
-          <div className="mb-4">
-            <label className="block text-[#666] text-xs font-medium mb-1">Tipo de Mídia</label>
-            <select value={mediaType} onChange={e => setMediaType(e.target.value)}
-              className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8]">
-              <option value="IMAGE">Imagem</option>
-              <option value="VIDEO">Vídeo / Reel</option>
-            </select>
-          </div>
-          <div className="mb-4">
-            <label className="block text-[#666] text-xs font-medium mb-1">Mídia</label>
-            <label className={`flex items-center justify-center gap-2 w-full border border-dashed rounded-lg px-3 py-4 text-sm cursor-pointer transition-colors ${
-              uploading ? 'border-indigo-500/40 text-indigo-300' : 'border-white/[0.12] text-[#888] hover:border-indigo-500/40 hover:text-[#e2e2e8]'
-            }`}>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime"
-                onChange={handleFileUpload}
-                disabled={uploading}
-                className="hidden"
-              />
-              {uploading
-                ? 'Enviando arquivo…'
-                : uploadedName
-                  ? `✓ ${uploadedName} — clique para trocar`
-                  : 'Enviar foto ou vídeo do computador'}
-            </label>
-            {mediaType === 'IMAGE' && mediaUrl && (
-              <img src={mediaUrl} alt="" className="mt-2 max-h-40 rounded-lg object-contain" />
-            )}
-            <p className="text-[#444] text-[11px] mt-2">
-              Ou informe a URL pública de uma mídia já hospedada:
-            </p>
-            <input type="url" value={mediaUrl} onChange={e => { setMediaUrl(e.target.value); setUploadedName('') }}
-              placeholder="https://exemplo.com/imagem.jpg"
-              className="w-full mt-1 bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
-          </div>
-          <div className="mb-4">
-            <label className="block text-[#666] text-xs font-medium mb-1">Legenda</label>
-            <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={3}
-              placeholder="Escreva a legenda do post..."
-              className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333] resize-none" />
-          </div>
-          <div className="mb-4">
-            <label className="block text-[#666] text-xs font-medium mb-1">Hashtags</label>
-            <input type="text" value={hashtags} onChange={e => setHashtags(e.target.value)}
-              placeholder="#marketing #instagram #negocios"
-              className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
-          </div>
-          {/* Automação de comentário deste post */}
-          <div className="mb-4 border border-white/[0.08] rounded-lg overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setAutoEnabled(!autoEnabled)}
-              className="w-full flex items-center justify-between px-3 py-2.5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors"
-            >
-              <span className="flex items-center gap-2 text-[13px] text-[#e2e2e8]">
-                <span className={`w-8 h-4 rounded-full relative transition-colors ${autoEnabled ? 'bg-indigo-500' : 'bg-white/[0.1]'}`}>
-                  <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${autoEnabled ? 'left-4' : 'left-0.5'}`} />
-                </span>
-                🤖 Automação de comentário neste post
-              </span>
-              <span className="text-[#555] text-xs">{autoEnabled ? 'Ativada' : 'Desativada'}</span>
-            </button>
-
-            {autoEnabled && (
-              <div className="p-3 space-y-3 border-t border-white/[0.06]">
-                <p className="text-[11px] text-[#666]">
-                  Quando alguém comentar a palavra-chave <b>neste post</b>, o bot responde e manda um DM.
-                  Depois do link, a conversa vai automaticamente para um atendente humano.
-                </p>
-
-                <div>
-                  <label className="block text-[#666] text-xs font-medium mb-1">Palavra-chave do comentário</label>
-                  <input type="text" value={autoKeyword} onChange={e => setAutoKeyword(e.target.value)}
-                    placeholder="Ex: QUERO"
-                    className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
-                </div>
-
-                <div>
-                  <label className="block text-[#666] text-xs font-medium mb-1">Resposta pública no comentário (opcional)</label>
-                  <input type="text" value={autoCommentReply} onChange={e => setAutoCommentReply(e.target.value)}
-                    placeholder="Te chamei no direto, {{primeiro_nome}}! 📩"
-                    className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333]" />
-                </div>
-
-                <div>
-                  <label className="block text-[#666] text-xs font-medium mb-1">1ª mensagem no direto (o gancho)</label>
-                  <textarea value={autoDmMessage} onChange={e => setAutoDmMessage(e.target.value)} rows={2}
-                    placeholder="Oi {{primeiro_nome}}! Responde SIM aqui que eu te mando o link 👇"
-                    className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333] resize-none" />
-                </div>
-
-                <div>
-                  <label className="block text-[#666] text-xs font-medium mb-1">2ª mensagem com o link (opcional)</label>
-                  <textarea value={autoLinkMessage} onChange={e => setAutoLinkMessage(e.target.value)} rows={2}
-                    placeholder="Perfeito, {{primeiro_nome}}! 🎉 Aqui está: seusite.com.br"
-                    className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8] placeholder-[#333] resize-none" />
-                  <p className="text-[10px] text-[#555] mt-1">
-                    Enviada só depois que a pessoa responder (a Meta não permite link no 1º contato).
-                    {' '}<b>Se deixar vazio</b>, o bot dispara a 1ª mensagem uma vez e passa direto para o atendente.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5">
-                  <span className="text-[10px] text-[#555]">Variáveis:</span>
-                  {['{{primeiro_nome}}', '{{nome}}', '{{usuario}}'].map(v => (
-                    <code key={v} className="text-[10px] bg-black/30 text-indigo-200 px-1.5 py-0.5 rounded">{v}</code>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-[#666] text-xs font-medium mb-1">Agendar para (opcional)</label>
-            <input type="datetime-local" value={scheduledFor} onChange={e => setScheduledFor(e.target.value)}
-              className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8]" />
-          </div>
-          <div className="flex gap-3">
-            <button onClick={handlePublish} disabled={publishing}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white rounded-lg text-sm font-semibold transition-colors">
-              {publishing ? 'Publicando...' : 'Publicar Agora'}
-            </button>
-            <button onClick={handleSchedule} disabled={publishing || !scheduledFor}
-              className="px-4 py-2 bg-[#111118] border border-white/[0.06] hover:bg-white/[0.04] disabled:opacity-50 text-[#666] rounded-lg text-sm font-semibold transition-colors">
-              {publishing ? 'Salvando...' : 'Agendar'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {tab === 'scheduled' && (
         <div>
           {loadingSchedules ? (
@@ -483,46 +308,7 @@ export default function PublicarInstagram() {
         </div>
       )}
 
-      {tab === 'automations' && (
-        <div className="grid lg:grid-cols-2 gap-6 max-w-5xl">
-          <form onSubmit={saveAutomation} className="bg-[#111118] rounded-xl border border-white/[0.06] p-6 h-fit space-y-4">
-            <div>
-              <h3 className="text-[#e2e2e8] font-semibold text-sm flex items-center gap-2"><MessageSquare size={15} className="text-emerald-400" /> Bot de mensagens</h3>
-              <p className="text-[#555] text-xs mt-1">Responda automaticamente palavras-chave recebidas pelo Direct ou WhatsApp.</p>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-[#666] mb-1">Palavra-chave</label>
-              <input required value={automationForm.keyword} onChange={e => setAutomationForm({ ...automationForm, keyword: e.target.value })} placeholder="Ex.: PREÇO"
-                className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-[#666] mb-1">Resposta automática</label>
-              <textarea required rows={3} value={automationForm.auto_reply_message} onChange={e => setAutomationForm({ ...automationForm, auto_reply_message: e.target.value })} placeholder="Olá {{primeiro_nome}}! Como posso ajudar?"
-                className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] rounded-lg text-sm resize-none focus:border-indigo-500 focus:outline-none" />
-            </div>
-            <label className="flex items-center gap-2.5 cursor-pointer text-sm text-[#c0c0d0]">
-              <input type="checkbox" checked={automationForm.handoff_to_human} onChange={e => setAutomationForm({ ...automationForm, handoff_to_human: e.target.checked })} className="accent-indigo-500" />
-              <UserCheck size={14} className="text-amber-400" /> Passar para atendente após responder
-            </label>
-            <div className="flex gap-3">
-              <button disabled={savingAutomation} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded-lg text-sm">{savingAutomation ? 'Salvando...' : editingAutomationId ? 'Salvar alterações' : 'Criar bot'}</button>
-              {editingAutomationId && <button type="button" onClick={() => startAutomationEdit()} className="px-4 py-2.5 border border-white/[0.08] text-[#888] rounded-lg text-sm">Cancelar</button>}
-            </div>
-          </form>
-
-          <div className="space-y-6">
-            <section>
-              <h3 className="text-[#e2e2e8] font-semibold text-sm mb-3 flex items-center gap-2"><MessageSquare size={15} className="text-emerald-400" /> Bots de mensagem</h3>
-              <AutomationList items={automations.filter(a => !a.media_id)} loading={loadingAutomations} onEdit={startAutomationEdit} onToggle={toggleAutomation} onDelete={deleteAutomation} />
-            </section>
-            <section>
-              <h3 className="text-[#e2e2e8] font-semibold text-sm mb-3 flex items-center gap-2"><Camera size={15} className="text-pink-400" /> Funis por post</h3>
-              <p className="text-[#555] text-xs mb-3">Criados no formulário Publicar; veja a mídia e a palavra-chave de cada funil.</p>
-              <AutomationList items={automations.filter(a => !!a.media_id)} loading={loadingAutomations} media={mediaList} onToggle={toggleAutomation} onDelete={deleteAutomation} />
-            </section>
-          </div>
-        </div>
-      )}
+      {/* Antiga aba de automations foi movida para publish_auto */}
 
       {tab === 'media' && (
         <div className="space-y-6">

@@ -448,49 +448,49 @@ export default function MarketingCampaignDetail() {
             const busy = busyId === as.id
             const ads = adsBySet[as.id] || []
             return (
-              <div key={as.id} className="bg-[#111118] rounded-xl border border-white/[0.06] overflow-hidden">
-                <div className="p-4 flex items-center gap-3">
+              <div key={as.id} className="bg-[#111118]/80 backdrop-blur-sm rounded-2xl border border-white/[0.06] overflow-hidden hover:border-indigo-500/30 transition-all shadow-xl">
+                <div className="p-5 flex items-center gap-4">
                   <button onClick={() => toggleExpand(as.id)} className="text-[#5a5a6e] hover:text-white shrink-0">
                     {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </button>
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpand(as.id)}>
-                    <h4 className="text-[#e2e2e8] font-semibold text-sm truncate">{as.name}</h4>
-                    <p className="text-[#555] text-xs mt-0.5">
-                      {centsToBRL(as.daily_budget)}/dia
-                      {as.bid_amount && ` · lance ${centsToBRL(as.bid_amount)}`}
-                      {as.optimization_goal && ` · ${as.optimization_goal}`}
+                    <h4 className="text-white font-bold text-base truncate hover:text-indigo-400 transition-colors">{as.name}</h4>
+                    <p className="text-[#888] text-xs mt-1 flex items-center gap-2">
+                      <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{centsToBRL(as.daily_budget)}/dia</span>
+                      {as.bid_amount && <span>· lance {centsToBRL(as.bid_amount)}</span>}
+                      {as.optimization_goal && <span>· {as.optimization_goal}</span>}
                     </p>
                   </div>
-                  <span className={`text-[11px] font-medium px-2 py-0.5 rounded shrink-0 ${
-                    as.status === 'ACTIVE' ? 'bg-green-900/20 text-green-400' : 'bg-white/[0.05] text-[#555]'
+                  <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 ${
+                    as.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-white/[0.05] text-[#888] border border-white/[0.05]'
                   }`}>
                     {as.status === 'ACTIVE' ? 'Ativo' : 'Pausado'}
                   </span>
                   <button
                     onClick={() => toggleAdSetStatus(as)}
                     disabled={busy}
-                    className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-[#8a8a9e] hover:text-white flex items-center justify-center transition-colors disabled:opacity-40"
+                    className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.04] hover:bg-indigo-500/20 text-[#8a8a9e] hover:text-indigo-400 flex items-center justify-center transition-colors disabled:opacity-40"
                   >
-                    {as.status === 'ACTIVE' ? <Pause size={13} /> : <Play size={13} />}
+                    {as.status === 'ACTIVE' ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" className="ml-1" />}
                   </button>
                   <button
                     onClick={() => deleteAdSet(as)}
                     disabled={busy}
-                    className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-red-900/30 text-[#8a8a9e] hover:text-red-400 flex items-center justify-center transition-colors disabled:opacity-40"
+                    className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.04] hover:bg-red-500/20 text-[#8a8a9e] hover:text-red-400 flex items-center justify-center transition-colors disabled:opacity-40"
                   >
-                    <Trash2 size={13} />
+                    <Trash2 size={15} />
                   </button>
                 </div>
 
                 {isOpen && (
-                  <div className="border-t border-white/[0.06] p-4 bg-black/10">
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-[#444]">Anúncios</p>
+                  <div className="border-t border-white/[0.06] p-5 bg-black/20">
+                    <div className="flex items-center justify-between mb-4">
+                      <p className="text-[12px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-2"><ImageIcon size={14} /> Anúncios</p>
                       <button
                         onClick={() => openAdModal(as.id)}
-                        className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 font-medium"
+                        className="flex items-center gap-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg font-medium shadow-lg shadow-indigo-500/20 transition-all"
                       >
-                        <Plus size={12} /> Novo anúncio
+                        <Plus size={14} /> Novo anúncio
                       </button>
                     </div>
                     {ads.length === 0 ? (
@@ -498,36 +498,36 @@ export default function MarketingCampaignDetail() {
                     ) : (
                       <div className="space-y-2">
                         {ads.map((ad) => (
-                          <div key={ad.id} className="flex items-center gap-3 bg-[#0a0a0f] border border-white/[0.05] rounded-lg p-3">
+                          <div key={ad.id} className="flex items-center gap-4 bg-[#0a0a0f] border border-white/[0.04] rounded-xl p-3 hover:border-white/[0.1] transition-colors shadow-sm">
                             {ad.thumbnail_url ? (
-                              <img src={ad.thumbnail_url} className="w-10 h-10 rounded object-cover shrink-0" alt="" />
+                              <img src={ad.thumbnail_url} className="w-12 h-12 rounded-lg object-cover shrink-0 shadow-md" alt="" />
                             ) : (
-                              <div className="w-10 h-10 rounded bg-white/[0.05] flex items-center justify-center shrink-0">
-                                <ImageIcon size={14} className="text-[#444]" />
+                              <div className="w-12 h-12 rounded-lg bg-white/[0.02] border border-white/[0.05] flex items-center justify-center shrink-0">
+                                <ImageIcon size={18} className="text-[#444]" />
                               </div>
                             )}
                             <div className="flex-1 min-w-0">
-                              <p className="text-[#e2e2e8] text-xs font-medium truncate">{ad.name}</p>
-                              <p className="text-[#555] text-[11px] truncate">{ad.creative_name}</p>
+                              <p className="text-white text-sm font-semibold truncate">{ad.name}</p>
+                              <p className="text-[#888] text-xs truncate mt-0.5">{ad.creative_name}</p>
                             </div>
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
-                              ad.status === 'ACTIVE' ? 'bg-green-900/20 text-green-400' : 'bg-white/[0.05] text-[#555]'
+                            <span className={`text-[10px] font-bold px-2 py-1 rounded-md shrink-0 ${
+                              ad.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-white/[0.05] text-[#888] border border-white/[0.05]'
                             }`}>
                               {ad.status === 'ACTIVE' ? 'Ativo' : 'Pausado'}
                             </span>
                             <button
                               onClick={() => toggleAdStatus(as.id, ad)}
                               disabled={busyId === ad.id}
-                              className="w-7 h-7 shrink-0 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-[#8a8a9e] hover:text-white flex items-center justify-center transition-colors disabled:opacity-40"
+                              className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-indigo-500/20 text-[#8a8a9e] hover:text-indigo-400 flex items-center justify-center transition-colors disabled:opacity-40"
                             >
-                              {ad.status === 'ACTIVE' ? <Pause size={11} /> : <Play size={11} />}
+                              {ad.status === 'ACTIVE' ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="ml-0.5" />}
                             </button>
                             <button
                               onClick={() => deleteAd(as.id, ad)}
                               disabled={busyId === ad.id}
-                              className="w-7 h-7 shrink-0 rounded-lg bg-white/[0.04] hover:bg-red-900/30 text-[#8a8a9e] hover:text-red-400 flex items-center justify-center transition-colors disabled:opacity-40"
+                              className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-red-500/20 text-[#8a8a9e] hover:text-red-400 flex items-center justify-center transition-colors disabled:opacity-40"
                             >
-                              <Trash2 size={11} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         ))}
