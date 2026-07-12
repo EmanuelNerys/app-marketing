@@ -13,6 +13,7 @@ from app.routes import auth, webhook, dashboard, leads, accounts, automations, p
 from app.routes import auth_jwt, conversations, messages, ws, whatsapp, payments, tenants, clients
 from app.routes import auth_email
 from app.routes import marketing
+from app.routes import studio
 
 # Register all models with Base.metadata so create_all creates every table
 import app.models.meta_connection   # noqa: F401
@@ -141,6 +142,9 @@ app.include_router(auth_email.router, prefix="/api/v1")
 
 # Marketing API (campaigns, ad sets, creatives, ads)
 app.include_router(marketing.router, prefix="/api/v1")
+
+# Studio de Criação (geração de vídeo com IA)
+app.include_router(studio.router, prefix="/api/v1")
 
 # WebSocket (sem prefix /api/v1 — não usa path prefix)
 app.include_router(ws.router)

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
@@ -42,6 +42,8 @@ export default function App() {
           <Route path="/app" element={<Dashboard />} />
           <Route path="/app/conexao" element={<ConexaoMeta />} />
           <Route path="/app/publicar" element={<PublicarInstagram />} />
+          {/* Publicar + Automação foram unificados em /app/publicar */}
+          <Route path="/app/automacao" element={<Navigate to="/app/publicar" replace />} />
           <Route path="/app/whatsapp" element={<WhatsApp />} />
           <Route path="/app/instagram-dm" element={<InstagramInbox />} />
           <Route path="/app/templates" element={<Templates />} />

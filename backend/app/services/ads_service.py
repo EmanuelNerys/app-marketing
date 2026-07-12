@@ -122,6 +122,23 @@ async def delete_campaign(token: str, campaign_id: str) -> dict:
     )
 
 
+async def copy_object(token: str, node_id: str, deep_copy: bool = False) -> dict:
+    """
+    Duplica um objeto de anúncio (campanha, conjunto ou anúncio) usando a edge
+    /copies da Meta. A cópia nasce PAUSADA. deep_copy=True (só campanha/conjunto)
+    também copia os filhos (conjuntos/anúncios).
+    """
+    payload: dict = {"status_option": "PAUSED"}
+    if deep_copy:
+        payload["deep_copy"] = True
+    return await _request(
+        "POST",
+        f"{settings.meta_graph_url}/{node_id}/copies",
+        params={"access_token": token},
+        json=payload,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ad Sets
 # ---------------------------------------------------------------------------
@@ -154,7 +171,14 @@ async def create_ad_set(
         "status": "PAUSED",
     }
     if bid_amount:
+        # Lance manual → estratégia com teto de lance (exige o valor do lance).
+        payload["bid_strategy"] = "LOWEST_COST_WITH_BID_CAP"
         payload["bid_amount"] = str(bid_amount)
+    else:
+        # Sem lance manual → "maior volume de resultados pelo orçamento" (não exige
+        # valor de lance). Sem definir a estratégia, a Meta recusa com o subcode
+        # 2490487 ("valor ou restrições de lance obrigatórios").
+        payload["bid_strategy"] = "LOWEST_COST_WITHOUT_CAP"
     if end_time:
         payload["end_time"] = end_time
     return await _request(
@@ -273,6 +297,70 @@ async def create_ad_creative(
         f"{settings.meta_graph_url}/{_act(ad_account_id)}/adcreatives",
         params={"access_token": token},
         json={"name": name, "object_story_spec": object_story_spec},
+    )
+
+
+async def get_promotable_instagram(token: str, page_id: str | None = None) -> dict:
+    """
+    Descobre a conta do Instagram vinculada (para impulsionar posts existentes).
+    Retorna {ig_user_id, username, page_id} — usa a página informada ou a 1ª
+    página com Instagram conectado.
+    """
+    data = await _request(
+        "GET",
+        f"{settings.meta_graph_url}/me/accounts",
+        params={"access_token": token, "fields": "id,name,instagram_business_account{id,username}"},
+    )
+    pages = data.get("data", [])
+    chosen = None
+    if page_id:
+        chosen = next((p for p in pages if p.get("id") == page_id and p.get("instagram_business_account")), None)
+    if not chosen:
+        chosen = next((p for p in pages if p.get("instagram_business_account")), None)
+    if not chosen:
+        return {}
+    ig = chosen["instagram_business_account"]
+    return {"ig_user_id": ig.get("id"), "username": ig.get("username"), "page_id": chosen.get("id")}
+
+
+async def list_instagram_posts(token: str, ig_user_id: str, limit: int = 25) -> list[dict]:
+    """Lista os posts do Instagram que podem ser impulsionados como anúncio."""
+    data = await _request(
+        "GET",
+        f"{settings.meta_graph_url}/{ig_user_id}/media",
+        params={
+            "access_token": token,
+            "fields": "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp",
+            "limit": limit,
+        },
+    )
+    return data.get("data", [])
+
+
+async def create_creative_from_post(
+    token: str,
+    ad_account_id: str,
+    name: str,
+    ig_user_id: str,
+    source_instagram_media_id: str,
+    link_url: str,
+    cta_type: str = "LEARN_MORE",
+) -> dict:
+    """
+    Cria um criativo a partir de um post existente do Instagram (impulsionar).
+    Recipe validada: source_instagram_media_id + instagram_user_id + call_to_action
+    (a Meta exige um link de destino, mesmo impulsionando um post orgânico).
+    """
+    return await _request(
+        "POST",
+        f"{settings.meta_graph_url}/{_act(ad_account_id)}/adcreatives",
+        params={"access_token": token},
+        json={
+            "name": name,
+            "source_instagram_media_id": source_instagram_media_id,
+            "instagram_user_id": ig_user_id,
+            "call_to_action": {"type": cta_type, "value": {"link": link_url}},
+        },
     )
 
 
@@ -402,6 +490,14 @@ async def search_geo_locations(token: str, query: str, limit: int = 10) -> list[
 # Insights — funciona para qualquer nó (conta, campanha, ad set ou anúncio)
 # ---------------------------------------------------------------------------
 
+# Campos ricos de insights: além de gasto/impressões/cliques, traz alcance,
+# frequência, CPC e os resultados/valores de conversão + ROAS que a Meta calcula.
+INSIGHTS_FIELDS_RICH = (
+    "spend,impressions,reach,frequency,clicks,ctr,cpc,cpm,"
+    "actions,action_values,purchase_roas,cost_per_action_type"
+)
+
+
 async def get_insights(
     token: str,
     node_id: str,
@@ -410,6 +506,8 @@ async def get_insights(
     until: str | None = None,
     time_increment: int | str | None = None,
     fields: str = "spend,impressions,clicks,ctr,cpm,actions",
+    level: str | None = None,
+    breakdowns: str | None = None,
 ) -> list[dict]:
     """
     Busca insights de qualquer nó da Marketing API (conta, campanha, ad set
@@ -417,6 +515,9 @@ async def get_insights(
 
     since/until (YYYY-MM-DD) têm prioridade sobre date_preset quando informados.
     time_increment=1 retorna uma linha por dia (para gráficos de série temporal).
+    level ('adset'/'ad') retorna uma linha por entidade filha (desempenho por
+    conjunto/anúncio). breakdowns ('age', 'gender', 'publisher_platform'...)
+    quebra os números por dimensão.
     """
     params: dict = {"access_token": token, "fields": fields}
     if since and until:
@@ -425,6 +526,10 @@ async def get_insights(
         params["date_preset"] = date_preset
     if time_increment:
         params["time_increment"] = str(time_increment)
+    if level:
+        params["level"] = level
+    if breakdowns:
+        params["breakdowns"] = breakdowns
 
     data = await _request(
         "GET", f"{settings.meta_graph_url}/{node_id}/insights", params=params,

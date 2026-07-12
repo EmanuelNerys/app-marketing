@@ -1,0 +1,7 @@
+# HTTPS automático (Let's Encrypt) para o domínio definido em $DOMAIN.
+# O Caddy termina o TLS e repassa tudo pro frontend (nginx), que por sua vez
+# já faz o proxy interno de /api e /ws pro backend.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy frontend:5173
+}

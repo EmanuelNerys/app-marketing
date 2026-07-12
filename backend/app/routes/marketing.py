@@ -104,12 +104,24 @@ class CarouselItem(BaseModel):
 
 class AdCreativeCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    message: str = Field(..., min_length=1)
+    message: str = Field(default="")
     image_url: Optional[str] = None
     link_url: Optional[str] = None
     video_id: Optional[str] = None
     video_thumb_url: Optional[str] = None
     carousel_items: list[CarouselItem] | None = Field(default=None, min_length=2, max_length=10)
+    # Impulsionar um post existente do Instagram (link_url é obrigatório nesse caso)
+    source_instagram_media_id: Optional[str] = None
+    cta_type: str = Field(default="LEARN_MORE")
+
+
+class InstagramPostOut(BaseModel):
+    id: str
+    caption: str | None = None
+    media_type: str | None = None
+    thumbnail_url: str | None = None
+    permalink: str | None = None
+    timestamp: str | None = None
 
 
 class AdCreate(BaseModel):
@@ -136,9 +148,42 @@ class AdOut(BaseModel):
 class AdInsightsOut(BaseModel):
     spend: float = 0.0
     impressions: int = 0
+    reach: int = 0
+    frequency: float = 0.0
     clicks: int = 0
     ctr: float = 0.0
+    cpc: float = 0.0
     cpm: float = 0.0
+    results: float = 0.0
+    result_label: str = ""
+    cost_per_result: float = 0.0
+    purchase_value: float = 0.0
+    roas: float = 0.0
+
+
+class EntityInsightsOut(BaseModel):
+    """Desempenho de uma entidade filha (conjunto ou anúncio) de uma campanha."""
+    id: str
+    name: str | None = None
+    spend: float = 0.0
+    impressions: int = 0
+    reach: int = 0
+    clicks: int = 0
+    ctr: float = 0.0
+    results: float = 0.0
+    result_label: str = ""
+    cost_per_result: float = 0.0
+
+
+class BreakdownRowOut(BaseModel):
+    """Uma linha de insights quebrada por dimensão (idade, gênero, plataforma...)."""
+    key: str
+    spend: float = 0.0
+    impressions: int = 0
+    reach: int = 0
+    clicks: int = 0
+    ctr: float = 0.0
+    results: float = 0.0
 
 
 class InsightsPoint(BaseModel):
@@ -200,13 +245,97 @@ def _build_targeting(t: TargetingSpec) -> dict:
     return targeting
 
 
+# Prioridade de "resultado": a conversão mais valiosa presente vira o resultado
+# principal (compras > leads > conversas > cliques no link). Cobre os objetivos
+# mais comuns sem depender de saber o objetivo da campanha em cada linha.
+_RESULT_ACTIONS: list[tuple[str, str]] = [
+    ("offsite_conversion.fb_pixel_purchase", "Compras"),
+    ("omni_purchase", "Compras"),
+    ("purchase", "Compras"),
+    ("onsite_conversion.purchase", "Compras"),
+    ("offsite_conversion.fb_pixel_lead", "Leads"),
+    ("onsite_conversion.lead_grouped", "Leads"),
+    ("leadgen.other", "Leads"),
+    ("lead", "Leads"),
+    ("onsite_conversion.messaging_conversation_started_7d", "Conversas"),
+    ("link_click", "Cliques no link"),
+    ("landing_page_view", "Visitas à página"),
+]
+_PURCHASE_VALUE_KEYS = ("omni_purchase", "purchase", "offsite_conversion.fb_pixel_purchase")
+
+
+def _actions_map(rows: list | None) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for a in rows or []:
+        try:
+            out[a.get("action_type", "")] = float(a.get("value", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _pick_result(actions: list | None) -> tuple[float, str]:
+    """Escolhe a conversão mais relevante presente → (quantidade, rótulo)."""
+    m = _actions_map(actions)
+    for action_type, label in _RESULT_ACTIONS:
+        if m.get(action_type, 0) > 0:
+            return m[action_type], label
+    return 0.0, ""
+
+
+def _purchase_value(item: dict) -> float:
+    vals = _actions_map(item.get("action_values"))
+    for key in _PURCHASE_VALUE_KEYS:
+        if vals.get(key, 0) > 0:
+            return vals[key]
+    return 0.0
+
+
+def _roas(item: dict, spend: float) -> float:
+    pr = item.get("purchase_roas") or []
+    if pr:
+        try:
+            return float(pr[0].get("value", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+    value = _purchase_value(item)
+    return round(value / spend, 2) if spend else 0.0
+
+
 def _insights_row(item: dict) -> AdInsightsOut:
+    spend = float(item.get("spend", 0) or 0)
+    results, label = _pick_result(item.get("actions"))
     return AdInsightsOut(
-        spend=float(item.get("spend", 0) or 0),
+        spend=spend,
         impressions=int(item.get("impressions", 0) or 0),
+        reach=int(item.get("reach", 0) or 0),
+        frequency=float(item.get("frequency", 0) or 0),
         clicks=int(item.get("clicks", 0) or 0),
         ctr=float(item.get("ctr", 0) or 0),
+        cpc=float(item.get("cpc", 0) or 0),
         cpm=float(item.get("cpm", 0) or 0),
+        results=results,
+        result_label=label,
+        cost_per_result=round(spend / results, 2) if results else 0.0,
+        purchase_value=_purchase_value(item),
+        roas=_roas(item, spend),
+    )
+
+
+def _entity_row(item: dict, id_field: str, name_field: str) -> EntityInsightsOut:
+    spend = float(item.get("spend", 0) or 0)
+    results, label = _pick_result(item.get("actions"))
+    return EntityInsightsOut(
+        id=item.get(id_field, ""),
+        name=item.get(name_field),
+        spend=spend,
+        impressions=int(item.get("impressions", 0) or 0),
+        reach=int(item.get("reach", 0) or 0),
+        clicks=int(item.get("clicks", 0) or 0),
+        ctr=float(item.get("ctr", 0) or 0),
+        results=results,
+        result_label=label,
+        cost_per_result=round(spend / results, 2) if results else 0.0,
     )
 
 
@@ -327,6 +456,20 @@ async def api_delete_campaign(
     return {"success": True}
 
 
+@router.post("/campaigns/{campaign_id}/copy")
+async def api_copy_campaign(
+    campaign_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Duplica a campanha inteira (com conjuntos e anúncios), pausada."""
+    _, token = await _get_ads_connection(current_user, db)
+    result = await ads_service.copy_object(token, campaign_id, deep_copy=True)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao duplicar campanha."))
+    return {"success": True, "result": result}
+
+
 @router.get("/campaigns/{campaign_id}/insights", response_model=list[InsightsPoint])
 async def api_campaign_insights(
     campaign_id: str,
@@ -439,6 +582,20 @@ async def api_delete_ad_set(
     return {"success": True}
 
 
+@router.post("/ad-sets/{ad_set_id}/copy")
+async def api_copy_ad_set(
+    ad_set_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Duplica o conjunto de anúncios (com seus anúncios), pausado."""
+    _, token = await _get_ads_connection(current_user, db)
+    result = await ads_service.copy_object(token, ad_set_id, deep_copy=True)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao duplicar conjunto."))
+    return {"success": True, "result": result}
+
+
 @router.get("/ad-sets/{ad_set_id}/ads", response_model=list[AdOut])
 async def api_list_ads(
     ad_set_id: str,
@@ -486,6 +643,30 @@ async def api_upload_video(
     return {"video_id": video_id}
 
 
+@router.get("/instagram-posts", response_model=list[InstagramPostOut])
+async def api_list_instagram_posts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Posts do Instagram que podem ser impulsionados como anúncio."""
+    conn, token = await _get_ads_connection(current_user, db)
+    ig = await ads_service.get_promotable_instagram(token, conn.page_id)
+    if not ig.get("ig_user_id"):
+        raise HTTPException(400, "Nenhuma conta do Instagram vinculada a uma Página do Facebook nesta conta de anúncios.")
+    posts = await ads_service.list_instagram_posts(token, ig["ig_user_id"])
+    return [
+        InstagramPostOut(
+            id=p.get("id", ""),
+            caption=p.get("caption"),
+            media_type=p.get("media_type"),
+            thumbnail_url=p.get("thumbnail_url") or p.get("media_url"),
+            permalink=p.get("permalink"),
+            timestamp=p.get("timestamp"),
+        )
+        for p in posts
+    ]
+
+
 @router.post("/creatives")
 async def api_create_creative(
     body: AdCreativeCreate,
@@ -494,6 +675,24 @@ async def api_create_creative(
 ):
     conn, token = await _get_ads_connection(current_user, db)
     ad_account_id = _require_ad_account(conn)
+
+    # Impulsionar um post existente do Instagram
+    if body.source_instagram_media_id:
+        if not body.link_url:
+            raise HTTPException(400, "Para impulsionar um post, informe o link de destino.")
+        ig = await ads_service.get_promotable_instagram(token, conn.page_id)
+        if not ig.get("ig_user_id"):
+            raise HTTPException(400, "Nenhuma conta do Instagram vinculada a uma Página do Facebook.")
+        result = await ads_service.create_creative_from_post(
+            token, ad_account_id, body.name, ig["ig_user_id"],
+            body.source_instagram_media_id, body.link_url, cta_type=body.cta_type,
+        )
+        if "id" not in result:
+            raise HTTPException(status_code=400, detail=f"Erro ao criar criativo do post: {result}")
+        return {"success": True, "creative_id": result["id"]}
+
+    if not body.message.strip():
+        raise HTTPException(422, "A mensagem do anúncio é obrigatória.")
     page_id = conn.page_id or ""
     if not page_id:
         raise HTTPException(
@@ -560,6 +759,20 @@ async def api_delete_ad(
     return {"success": True}
 
 
+@router.post("/ads/{ad_id}/copy")
+async def api_copy_ad(
+    ad_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Duplica o anúncio, pausado."""
+    _, token = await _get_ads_connection(current_user, db)
+    result = await ads_service.copy_object(token, ad_id, deep_copy=False)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao duplicar anúncio."))
+    return {"success": True, "result": result}
+
+
 # ---------------------------------------------------------------------------
 # Targeting search (autocomplete)
 # ---------------------------------------------------------------------------
@@ -608,10 +821,76 @@ async def api_insights(
     ad_account_id = _require_ad_account(conn)
     data = await ads_service.get_account_insights(
         token, ad_account_id, date_preset=date_preset, since=since, until=until,
+        fields=ads_service.INSIGHTS_FIELDS_RICH,
     )
     if not data:
         return AdInsightsOut()
     return _insights_row(data[0])
+
+
+@router.get("/campaigns/{campaign_id}/insights/by-level", response_model=list[EntityInsightsOut])
+async def api_campaign_insights_by_level(
+    campaign_id: str,
+    level: str = Query("adset", pattern="^(adset|ad)$"),
+    date_preset: str = Query("last_30d"),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Desempenho por conjunto (level=adset) ou por anúncio (level=ad) de uma campanha."""
+    _, token = await _get_ads_connection(current_user, db)
+    id_field, name_field = ("adset_id", "adset_name") if level == "adset" else ("ad_id", "ad_name")
+    fields = f"{id_field},{name_field},spend,impressions,reach,clicks,ctr,actions"
+    data = await ads_service.get_insights(
+        token, campaign_id, date_preset=date_preset, since=since, until=until,
+        fields=fields, level=level,
+    )
+    return [_entity_row(item, id_field, name_field) for item in data]
+
+
+# Dimensões de breakdown suportadas → campo retornado pela Graph que carrega o valor
+_BREAKDOWN_KEYS: dict[str, str] = {
+    "age": "age",
+    "gender": "gender",
+    "publisher_platform": "publisher_platform",
+    "impression_device": "impression_device",
+    "region": "region",
+}
+
+
+@router.get("/campaigns/{campaign_id}/insights/breakdown", response_model=list[BreakdownRowOut])
+async def api_campaign_insights_breakdown(
+    campaign_id: str,
+    dimension: str = Query("age"),
+    date_preset: str = Query("last_30d"),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Insights da campanha quebrados por dimensão (idade, gênero, plataforma, dispositivo, região)."""
+    if dimension not in _BREAKDOWN_KEYS:
+        raise HTTPException(422, f"Dimensão inválida. Use: {', '.join(_BREAKDOWN_KEYS)}")
+    _, token = await _get_ads_connection(current_user, db)
+    key = _BREAKDOWN_KEYS[dimension]
+    data = await ads_service.get_insights(
+        token, campaign_id, date_preset=date_preset, since=since, until=until,
+        fields="spend,impressions,reach,clicks,ctr,actions", breakdowns=dimension,
+    )
+    rows: list[BreakdownRowOut] = []
+    for item in data:
+        results, _ = _pick_result(item.get("actions"))
+        rows.append(BreakdownRowOut(
+            key=str(item.get(key, "—")),
+            spend=float(item.get("spend", 0) or 0),
+            impressions=int(item.get("impressions", 0) or 0),
+            reach=int(item.get("reach", 0) or 0),
+            clicks=int(item.get("clicks", 0) or 0),
+            ctr=float(item.get("ctr", 0) or 0),
+            results=results,
+        ))
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -676,3 +955,46 @@ async def api_attribution(
         leads_from_ads=sum(a.leads for a in by_ad),
         by_ad=by_ad,
     )
+
+
+class AdLeadOut(BaseModel):
+    name: str
+    phone: str
+    ad_name: str | None = None
+
+
+@router.get("/attribution/leads", response_model=list[AdLeadOut])
+async def api_attribution_leads(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Leads gerados pelos anúncios que têm telefone — prontos para exportar em CSV
+    (nome, telefone) e importar direto na ferramenta de disparo (Follow-ups).
+    """
+    rows = (await db.execute(
+        select(Lead.name, Lead.phone, Lead.origin_ad_id)
+        .where(
+            Lead.account_id == current_user.tenant_id,
+            Lead.origin_ad_id.isnot(None),
+            Lead.phone.isnot(None),
+        )
+        .order_by(Lead.id.desc())
+        .limit(5000)
+    )).all()
+
+    ad_ids = list({r[2] for r in rows if r[2]})
+    ad_names: dict[str, str] = {}
+    if ad_ids:
+        try:
+            _, token = await _get_ads_connection(current_user, db)
+            ad_names = await ads_service.get_ad_names(token, ad_ids)
+        except HTTPException:
+            pass
+        except Exception as exc:
+            logger.debug("Não foi possível resolver nomes de anúncios: %s", exc)
+
+    return [
+        AdLeadOut(name=name or phone, phone=phone, ad_name=ad_names.get(ad_id))
+        for name, phone, ad_id in rows
+    ]

@@ -108,11 +108,11 @@ export default function Sidebar() {
           onClick={() => navigate('/')}
           className="flex items-center gap-2 group"
         >
-          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-neon-pink via-neon-purple to-neon-cyan flex items-center justify-center shadow-lg shadow-neon-purple/40">
             <Clapperboard size={14} className="text-white" />
           </div>
           <span className="text-sm font-semibold text-white">
-            ad<span className="text-indigo-400">Studio</span>AI
+            ad<span className="bg-gradient-to-r from-neon-pink via-neon-purple to-neon-cyan bg-clip-text text-transparent">Studio</span>AI
           </span>
         </button>
       </div>

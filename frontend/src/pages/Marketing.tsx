@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Pause, Play, Trash2, ChevronRight, Building2 } from 'lucide-react'
+import { Pause, Play, Trash2, ChevronRight, Building2, Copy, Download } from 'lucide-react'
 import api from '../services/api'
 
 interface Campaign {
@@ -15,9 +15,17 @@ interface Campaign {
 interface Insights {
   spend: number
   impressions: number
+  reach: number
+  frequency: number
   clicks: number
   ctr: number
+  cpc: number
   cpm: number
+  results: number
+  result_label: string
+  cost_per_result: number
+  purchase_value: number
+  roas: number
 }
 
 interface AdAccount {
@@ -59,6 +67,7 @@ export default function Marketing() {
 
   const [datePreset, setDatePreset] = useState('last_30d')
   const [busyCampaignId, setBusyCampaignId] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   const [showCreate, setShowCreate] = useState(false)
   const [campName, setCampName] = useState('')
@@ -170,6 +179,48 @@ export default function Marketing() {
     }
   }
 
+  async function handleDuplicate(c: Campaign) {
+    setBusyCampaignId(c.id)
+    try {
+      await api.post(`/marketing/campaigns/${c.id}/copy`)
+      await loadData(datePreset)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Erro ao duplicar campanha.')
+    } finally {
+      setBusyCampaignId(null)
+    }
+  }
+
+  async function exportCsv() {
+    setExporting(true)
+    setError('')
+    try {
+      // Leads dos anúncios (nome, telefone) — encaixe direto no import do disparo (Follow-ups)
+      const { data } = await api.get<{ name: string; phone: string; ad_name: string | null }[]>('/marketing/attribution/leads')
+      if (data.length === 0) {
+        setError('Nenhum lead com telefone veio dos anúncios ainda. Assim que chegarem leads por Click-to-WhatsApp/Lead Ads, eles aparecem aqui.')
+        return
+      }
+      // Cabeçalho nome,telefone (o import casa por nome de coluna); "anuncio" é contexto extra e é ignorado no import
+      const header = ['nome', 'telefone', 'anuncio']
+      const rows = data.map((l) => [l.name, l.phone, l.ad_name || ''])
+      const csv = [header, ...rows]
+        .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+        .join('\n')
+      const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `leads-anuncios-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Erro ao exportar leads.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
@@ -209,6 +260,14 @@ export default function Marketing() {
             ))}
           </div>
           <button
+            onClick={exportCsv}
+            disabled={exporting}
+            title="Exportar leads dos anúncios (nome, telefone) para o disparo em Follow-ups"
+            className="flex items-center gap-1.5 px-3 py-2 bg-[#111118] border border-white/[0.08] text-[#8a8a9e] hover:text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-40"
+          >
+            <Download size={14} /> {exporting ? 'Exportando…' : 'Leads CSV'}
+          </button>
+          <button
             onClick={() => setShowCreate(true)}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
           >
@@ -223,30 +282,43 @@ export default function Marketing() {
 
       {/* Insights */}
       {insights && (
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
-          <div className="bg-gradient-to-br from-indigo-900/40 to-[#111118] rounded-2xl border border-indigo-500/20 p-5 shadow-lg shadow-indigo-900/10 transition-transform hover:-translate-y-1">
-            <p className="text-indigo-300 text-xs mb-1 font-medium">Gastos</p>
-            <p className="text-2xl font-bold text-white">R$ {insights.spend.toFixed(2)}</p>
+        <div className="mb-8 space-y-4">
+          {/* Métricas de resultado — o que importa pra otimizar */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-indigo-900/40 to-[#111118] rounded-2xl border border-indigo-500/20 p-5 shadow-lg shadow-indigo-900/10 transition-transform hover:-translate-y-1">
+              <p className="text-indigo-300 text-xs mb-1 font-medium">Gastos</p>
+              <p className="text-2xl font-bold text-white">R$ {insights.spend.toFixed(2)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-emerald-900/40 to-[#111118] rounded-2xl border border-emerald-500/20 p-5 shadow-lg shadow-emerald-900/10 transition-transform hover:-translate-y-1">
+              <p className="text-emerald-300 text-xs mb-1 font-medium">{insights.result_label || 'Resultados'}</p>
+              <p className="text-2xl font-bold text-white">{insights.results ? insights.results.toLocaleString() : '—'}</p>
+            </div>
+            <div className="bg-gradient-to-br from-amber-900/40 to-[#111118] rounded-2xl border border-amber-500/20 p-5 shadow-lg shadow-amber-900/10 transition-transform hover:-translate-y-1">
+              <p className="text-amber-300 text-xs mb-1 font-medium">Custo / resultado</p>
+              <p className="text-2xl font-bold text-white">{insights.cost_per_result ? `R$ ${insights.cost_per_result.toFixed(2)}` : '—'}</p>
+            </div>
+            <div className="bg-gradient-to-br from-violet-900/40 to-[#111118] rounded-2xl border border-violet-500/20 p-5 shadow-lg shadow-violet-900/10 transition-transform hover:-translate-y-1">
+              <p className="text-violet-300 text-xs mb-1 font-medium">ROAS</p>
+              <p className="text-2xl font-bold text-white">{insights.roas ? `${insights.roas.toFixed(2)}×` : '—'}</p>
+            </div>
           </div>
-          <div className="bg-gradient-to-br from-emerald-900/40 to-[#111118] rounded-2xl border border-emerald-500/20 p-5 shadow-lg shadow-emerald-900/10 transition-transform hover:-translate-y-1">
-            <p className="text-emerald-300 text-xs mb-1 font-medium">Impressões</p>
-            <p className="text-2xl font-bold text-white">{insights.impressions.toLocaleString()}</p>
-          </div>
-          <div className="bg-gradient-to-br from-cyan-900/40 to-[#111118] rounded-2xl border border-cyan-500/20 p-5 shadow-lg shadow-cyan-900/10 transition-transform hover:-translate-y-1">
-            <p className="text-cyan-300 text-xs mb-1 font-medium">Cliques</p>
-            <p className="text-2xl font-bold text-white">{insights.clicks.toLocaleString()}</p>
-          </div>
-          <div className="bg-gradient-to-br from-blue-900/40 to-[#111118] rounded-2xl border border-blue-500/20 p-5 shadow-lg shadow-blue-900/10 transition-transform hover:-translate-y-1">
-            <p className="text-blue-300 text-xs mb-1 font-medium">CTR</p>
-            <p className="text-2xl font-bold text-white">{insights.ctr.toFixed(2)}%</p>
-          </div>
-          <div className="bg-gradient-to-br from-fuchsia-900/40 to-[#111118] rounded-2xl border border-fuchsia-500/20 p-5 shadow-lg shadow-fuchsia-900/10 transition-transform hover:-translate-y-1">
-            <p className="text-fuchsia-300 text-xs mb-1 font-medium">CPM</p>
-            <p className="text-2xl font-bold text-white">R$ {insights.cpm.toFixed(2)}</p>
-          </div>
-          <div className="bg-gradient-to-br from-violet-900/40 to-[#111118] rounded-2xl border border-violet-500/20 p-5 shadow-lg shadow-violet-900/10 transition-transform hover:-translate-y-1">
-            <p className="text-violet-300 text-xs mb-1 font-medium">Leads de anúncios</p>
-            <p className="text-2xl font-bold text-white">{attribution?.leads_from_ads ?? 0}</p>
+          {/* Alcance / engajamento */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: 'Alcance', value: insights.reach ? insights.reach.toLocaleString() : '—' },
+              { label: 'Frequência', value: insights.frequency ? insights.frequency.toFixed(2) : '—' },
+              { label: 'Impressões', value: insights.impressions.toLocaleString() },
+              { label: 'Cliques', value: insights.clicks.toLocaleString() },
+              { label: 'CTR', value: `${insights.ctr.toFixed(2)}%` },
+              { label: 'CPC', value: insights.cpc ? `R$ ${insights.cpc.toFixed(2)}` : '—' },
+              { label: 'CPM', value: `R$ ${insights.cpm.toFixed(2)}` },
+              { label: 'Leads de anúncios', value: (attribution?.leads_from_ads ?? 0).toLocaleString() },
+            ].map((m) => (
+              <div key={m.label} className="bg-[#111118] rounded-xl border border-white/[0.06] p-4">
+                <p className="text-[#666] text-xs mb-1">{m.label}</p>
+                <p className="text-lg font-bold text-[#e2e2e8]">{m.value}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -331,6 +403,14 @@ export default function Marketing() {
                     className="w-10 h-10 shrink-0 rounded-xl bg-white/[0.04] hover:bg-indigo-500/20 text-[#8a8a9e] hover:text-indigo-400 flex items-center justify-center transition-colors disabled:opacity-40"
                   >
                     {c.status === 'ACTIVE' ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-1" />}
+                  </button>
+                  <button
+                    onClick={() => handleDuplicate(c)}
+                    disabled={busy}
+                    title="Duplicar (cria uma cópia pausada)"
+                    className="w-10 h-10 shrink-0 rounded-xl bg-white/[0.04] hover:bg-emerald-500/20 text-[#8a8a9e] hover:text-emerald-400 flex items-center justify-center transition-colors disabled:opacity-40"
+                  >
+                    <Copy size={17} />
                   </button>
                   <button
                     onClick={() => handleDelete(c)}

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, Plus, Pause, Play, Trash2, ChevronDown, ChevronRight,
-  X, Image as ImageIcon, Video, GalleryHorizontal, Search,
+  X, Image as ImageIcon, Video, GalleryHorizontal, Search, Copy, Camera,
 } from 'lucide-react'
 import api from '../services/api'
 
@@ -40,6 +40,37 @@ interface InsightsPoint {
   clicks: number
 }
 
+interface EntityInsights {
+  id: string
+  name: string | null
+  spend: number
+  impressions: number
+  reach: number
+  clicks: number
+  ctr: number
+  results: number
+  result_label: string
+  cost_per_result: number
+}
+
+interface BreakdownRow {
+  key: string
+  spend: number
+  impressions: number
+  reach: number
+  clicks: number
+  ctr: number
+  results: number
+}
+
+const BREAKDOWN_DIMS: { value: string; label: string }[] = [
+  { value: 'age', label: 'Idade' },
+  { value: 'gender', label: 'Gênero' },
+  { value: 'publisher_platform', label: 'Plataforma' },
+  { value: 'impression_device', label: 'Dispositivo' },
+  { value: 'region', label: 'Região' },
+]
+
 interface TargetingOption {
   id: string
   name: string
@@ -47,7 +78,15 @@ interface TargetingOption {
   type?: string | null
 }
 
-type CreativeKind = 'image' | 'video' | 'carousel'
+type CreativeKind = 'image' | 'video' | 'carousel' | 'post'
+
+interface IgPost {
+  id: string
+  caption: string | null
+  media_type: string | null
+  thumbnail_url: string | null
+  permalink: string | null
+}
 
 interface CarouselItemForm {
   image_url: string
@@ -58,6 +97,16 @@ interface CarouselItemForm {
 function centsToBRL(cents: string | null): string {
   if (!cents) return '—'
   return `R$ ${(parseInt(cents) / 100).toFixed(2)}`
+}
+
+/** Métrica de desempenho compacta (rótulo em cima, valor embaixo). */
+function PerfMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-[#555]">{label}</p>
+      <p className="text-[13px] font-semibold text-[#e2e2e8]">{value}</p>
+    </div>
+  )
 }
 
 /** Autocomplete simples de segmentação (interesses ou localizações). */
@@ -154,6 +203,11 @@ export default function MarketingCampaignDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [insights, setInsights] = useState<InsightsPoint[]>([])
+  const [adSetInsights, setAdSetInsights] = useState<Record<string, EntityInsights>>({})
+  const [adInsights, setAdInsights] = useState<Record<string, EntityInsights>>({})
+  const [breakdownDim, setBreakdownDim] = useState('age')
+  const [breakdownRows, setBreakdownRows] = useState<BreakdownRow[]>([])
+  const [loadingBreakdown, setLoadingBreakdown] = useState(false)
 
   const [expandedSet, setExpandedSet] = useState<string | null>(null)
   const [adsBySet, setAdsBySet] = useState<Record<string, Ad[]>>({})
@@ -186,6 +240,10 @@ export default function MarketingCampaignDetail() {
   ])
   const [creatingAd, setCreatingAd] = useState(false)
   const [adModalStep, setAdModalStep] = useState<'idle' | 'uploading' | 'creating_creative' | 'creating_ad'>('idle')
+  // Impulsionar post existente
+  const [igPosts, setIgPosts] = useState<IgPost[]>([])
+  const [loadingPosts, setLoadingPosts] = useState(false)
+  const [selectedPostId, setSelectedPostId] = useState('')
 
   const loadCampaign = useCallback(async () => {
     try {
@@ -217,7 +275,31 @@ export default function MarketingCampaignDetail() {
     } catch { /* ignore */ }
   }, [campaignId])
 
-  useEffect(() => { loadCampaign(); loadAdSets(); loadInsights() }, [loadCampaign, loadAdSets, loadInsights])
+  const loadEntityInsights = useCallback(async () => {
+    if (!campaignId) return
+    try {
+      const [asRes, adRes] = await Promise.all([
+        api.get<EntityInsights[]>(`/marketing/campaigns/${campaignId}/insights/by-level`, { params: { level: 'adset', date_preset: 'last_30d' } }),
+        api.get<EntityInsights[]>(`/marketing/campaigns/${campaignId}/insights/by-level`, { params: { level: 'ad', date_preset: 'last_30d' } }),
+      ])
+      setAdSetInsights(Object.fromEntries(asRes.data.map((r) => [r.id, r])))
+      setAdInsights(Object.fromEntries(adRes.data.map((r) => [r.id, r])))
+    } catch { /* insights por entidade é enriquecimento — não bloqueia a tela */ }
+  }, [campaignId])
+
+  const loadBreakdown = useCallback(async (dim: string) => {
+    if (!campaignId) return
+    setLoadingBreakdown(true)
+    try {
+      const { data } = await api.get<BreakdownRow[]>(`/marketing/campaigns/${campaignId}/insights/breakdown`, {
+        params: { dimension: dim, date_preset: 'last_30d' },
+      })
+      setBreakdownRows(data)
+    } catch { setBreakdownRows([]) } finally { setLoadingBreakdown(false) }
+  }, [campaignId])
+
+  useEffect(() => { loadCampaign(); loadAdSets(); loadInsights(); loadEntityInsights() }, [loadCampaign, loadAdSets, loadInsights, loadEntityInsights])
+  useEffect(() => { loadBreakdown(breakdownDim) }, [breakdownDim, loadBreakdown])
 
   async function loadAds(adSetId: string) {
     try {
@@ -282,6 +364,30 @@ export default function MarketingCampaignDetail() {
     }
   }
 
+  async function duplicateAdSet(as: AdSet) {
+    setBusyId(as.id)
+    try {
+      await api.post(`/marketing/ad-sets/${as.id}/copy`)
+      await loadAdSets()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Erro ao duplicar conjunto.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function duplicateAd(adSetId: string, ad: Ad) {
+    setBusyId(ad.id)
+    try {
+      await api.post(`/marketing/ads/${ad.id}/copy`)
+      await loadAds(adSetId)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Erro ao duplicar anúncio.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   function openAdSetModal() {
     setAsName(''); setAsBudget('20.00'); setAsBid(''); setAsOptGoal('REACH')
     setAsAgeMin(18); setAsAgeMax(65); setAsGender('all'); setAsCountries('BR'); setAsInterests([])
@@ -321,11 +427,27 @@ export default function MarketingCampaignDetail() {
     setAdName(''); setCreativeKind('image'); setCreativeMessage('')
     setCreativeImageUrl(''); setCreativeLinkUrl(''); setCreativeVideoFile(null)
     setCarouselItems([{ image_url: '', link_url: '', message: '' }, { image_url: '', link_url: '', message: '' }])
+    setSelectedPostId('')
     setAdModalStep('idle')
     setShowAdModal(adSetId)
   }
 
-  const adFormValid = adName.trim() && creativeMessage.trim() && (
+  async function loadIgPosts() {
+    if (igPosts.length > 0 || loadingPosts) return
+    setLoadingPosts(true)
+    try {
+      const { data } = await api.get<IgPost[]>('/marketing/instagram-posts')
+      setIgPosts(data)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Não foi possível carregar seus posts do Instagram.')
+    } finally {
+      setLoadingPosts(false)
+    }
+  }
+
+  const adFormValid = adName.trim() && (
+    creativeKind === 'post' ? !!selectedPostId && !!creativeLinkUrl.trim() :
+    !creativeMessage.trim() ? false :
     creativeKind === 'image' ? !!creativeImageUrl.trim() :
     creativeKind === 'video' ? !!creativeVideoFile :
     carouselItems.filter((c) => c.image_url.trim()).length >= 2
@@ -353,7 +475,10 @@ export default function MarketingCampaignDetail() {
         name: `${adName.trim()} — criativo`,
         message: creativeMessage.trim(),
       }
-      if (creativeKind === 'image') {
+      if (creativeKind === 'post') {
+        creativePayload.source_instagram_media_id = selectedPostId
+        creativePayload.link_url = creativeLinkUrl.trim()
+      } else if (creativeKind === 'image') {
         creativePayload.image_url = creativeImageUrl.trim()
         if (creativeLinkUrl.trim()) creativePayload.link_url = creativeLinkUrl.trim()
       } else if (creativeKind === 'video') {
@@ -434,6 +559,56 @@ export default function MarketingCampaignDetail() {
         </div>
       )}
 
+      {/* Desempenho por segmento (breakdowns) */}
+      <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-5 mb-6 max-w-4xl">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <p className="text-sm font-semibold text-[#e2e2e8]">Desempenho por segmento</p>
+          <div className="flex gap-1 bg-[#0a0a0f] border border-white/[0.08] rounded-lg p-1">
+            {BREAKDOWN_DIMS.map((d) => (
+              <button
+                key={d.value}
+                onClick={() => setBreakdownDim(d.value)}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${breakdownDim === d.value ? 'bg-indigo-600 text-white' : 'text-[#5a5a6e] hover:text-[#c0c0d0]'}`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {loadingBreakdown ? (
+          <p className="text-[#555] text-sm">Carregando…</p>
+        ) : breakdownRows.length === 0 ? (
+          <p className="text-[#555] text-sm">Sem dados neste período (a campanha precisa ter tido entrega/gasto).</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[#555] text-xs text-left">
+                  <th className="pb-2 pr-4">Segmento</th>
+                  <th className="pb-2 pr-4 text-right">Gasto</th>
+                  <th className="pb-2 pr-4 text-right">Resultados</th>
+                  <th className="pb-2 pr-4 text-right">Alcance</th>
+                  <th className="pb-2 pr-4 text-right">Cliques</th>
+                  <th className="pb-2 text-right">CTR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdownRows.map((r) => (
+                  <tr key={r.key} className="border-t border-white/[0.06] text-[#c0c0d0]">
+                    <td className="py-2 pr-4 capitalize">{r.key}</td>
+                    <td className="py-2 pr-4 text-right">R$ {r.spend.toFixed(2)}</td>
+                    <td className="py-2 pr-4 text-right">{r.results ? r.results.toLocaleString() : '—'}</td>
+                    <td className="py-2 pr-4 text-right">{r.reach ? r.reach.toLocaleString() : '—'}</td>
+                    <td className="py-2 pr-4 text-right">{r.clicks.toLocaleString()}</td>
+                    <td className="py-2 text-right">{r.ctr.toFixed(2)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Conjuntos de anúncios */}
       {loading ? (
         <div className="text-[#555] text-sm">Carregando...</div>
@@ -474,6 +649,14 @@ export default function MarketingCampaignDetail() {
                     {as.status === 'ACTIVE' ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" className="ml-1" />}
                   </button>
                   <button
+                    onClick={() => duplicateAdSet(as)}
+                    disabled={busy}
+                    title="Duplicar conjunto (cópia pausada)"
+                    className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.04] hover:bg-emerald-500/20 text-[#8a8a9e] hover:text-emerald-400 flex items-center justify-center transition-colors disabled:opacity-40"
+                  >
+                    <Copy size={14} />
+                  </button>
+                  <button
                     onClick={() => deleteAdSet(as)}
                     disabled={busy}
                     className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.04] hover:bg-red-500/20 text-[#8a8a9e] hover:text-red-400 flex items-center justify-center transition-colors disabled:opacity-40"
@@ -481,6 +664,16 @@ export default function MarketingCampaignDetail() {
                     <Trash2 size={15} />
                   </button>
                 </div>
+
+                {adSetInsights[as.id] && (
+                  <div className="px-5 pb-4 -mt-2 flex flex-wrap gap-x-6 gap-y-1">
+                    <PerfMetric label="Gasto" value={`R$ ${adSetInsights[as.id].spend.toFixed(2)}`} />
+                    <PerfMetric label={adSetInsights[as.id].result_label || 'Resultados'} value={adSetInsights[as.id].results ? adSetInsights[as.id].results.toLocaleString() : '—'} />
+                    <PerfMetric label="Custo/result." value={adSetInsights[as.id].cost_per_result ? `R$ ${adSetInsights[as.id].cost_per_result.toFixed(2)}` : '—'} />
+                    <PerfMetric label="CTR" value={`${adSetInsights[as.id].ctr.toFixed(2)}%`} />
+                    <PerfMetric label="Alcance" value={adSetInsights[as.id].reach ? adSetInsights[as.id].reach.toLocaleString() : '—'} />
+                  </div>
+                )}
 
                 {isOpen && (
                   <div className="border-t border-white/[0.06] p-5 bg-black/20">
@@ -509,6 +702,14 @@ export default function MarketingCampaignDetail() {
                             <div className="flex-1 min-w-0">
                               <p className="text-white text-sm font-semibold truncate">{ad.name}</p>
                               <p className="text-[#888] text-xs truncate mt-0.5">{ad.creative_name}</p>
+                              {adInsights[ad.id] && (
+                                <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5 text-[11px] text-[#888]">
+                                  <span>Gasto <b className="text-[#c0c0d0]">R$ {adInsights[ad.id].spend.toFixed(2)}</b></span>
+                                  <span>{adInsights[ad.id].result_label || 'Result.'} <b className="text-[#c0c0d0]">{adInsights[ad.id].results ? adInsights[ad.id].results.toLocaleString() : '—'}</b></span>
+                                  <span>Custo/res. <b className="text-[#c0c0d0]">{adInsights[ad.id].cost_per_result ? `R$ ${adInsights[ad.id].cost_per_result.toFixed(2)}` : '—'}</b></span>
+                                  <span>CTR <b className="text-[#c0c0d0]">{adInsights[ad.id].ctr.toFixed(2)}%</b></span>
+                                </div>
+                              )}
                             </div>
                             <span className={`text-[10px] font-bold px-2 py-1 rounded-md shrink-0 ${
                               ad.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-white/[0.05] text-[#888] border border-white/[0.05]'
@@ -521,6 +722,14 @@ export default function MarketingCampaignDetail() {
                               className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-indigo-500/20 text-[#8a8a9e] hover:text-indigo-400 flex items-center justify-center transition-colors disabled:opacity-40"
                             >
                               {ad.status === 'ACTIVE' ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" className="ml-0.5" />}
+                            </button>
+                            <button
+                              onClick={() => duplicateAd(as.id, ad)}
+                              disabled={busyId === ad.id}
+                              title="Duplicar anúncio (cópia pausada)"
+                              className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-emerald-500/20 text-[#8a8a9e] hover:text-emerald-400 flex items-center justify-center transition-colors disabled:opacity-40"
+                            >
+                              <Copy size={13} />
                             </button>
                             <button
                               onClick={() => deleteAd(as.id, ad)}
@@ -694,13 +903,13 @@ export default function MarketingCampaignDetail() {
                 />
               </div>
 
-              <div className="flex gap-2">
-                {([['image', 'Imagem', ImageIcon], ['video', 'Vídeo', Video], ['carousel', 'Carrossel', GalleryHorizontal]] as const).map(([val, label, Icon]) => (
+              <div className="grid grid-cols-4 gap-2">
+                {([['image', 'Imagem', ImageIcon], ['video', 'Vídeo', Video], ['carousel', 'Carrossel', GalleryHorizontal], ['post', 'Post IG', Camera]] as const).map(([val, label, Icon]) => (
                   <button
                     key={val}
                     type="button"
-                    onClick={() => setCreativeKind(val)}
-                    className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-lg text-xs font-medium border transition-colors ${
+                    onClick={() => { setCreativeKind(val); if (val === 'post') loadIgPosts() }}
+                    className={`flex flex-col items-center gap-1 py-2.5 rounded-lg text-xs font-medium border transition-colors ${
                       creativeKind === val
                         ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-300'
                         : 'bg-white/[0.03] border-white/[0.08] text-[#5a5a6e] hover:text-white'
@@ -712,19 +921,23 @@ export default function MarketingCampaignDetail() {
                 ))}
               </div>
 
-              <div>
-                <label className="block text-[11px] text-[#666] mb-1">Texto do anúncio</label>
-                <textarea
-                  value={creativeMessage}
-                  onChange={(e) => setCreativeMessage(e.target.value)}
-                  rows={3}
-                  placeholder="Ex.: Frete grátis em compras acima de R$150!"
-                  className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none resize-none"
-                />
-              </div>
+              {creativeKind !== 'post' && (
+                <div>
+                  <label className="block text-[11px] text-[#666] mb-1">Texto do anúncio</label>
+                  <textarea
+                    value={creativeMessage}
+                    onChange={(e) => setCreativeMessage(e.target.value)}
+                    rows={3}
+                    placeholder="Ex.: Frete grátis em compras acima de R$150!"
+                    className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none resize-none"
+                  />
+                </div>
+              )}
 
               <div>
-                <label className="block text-[11px] text-[#666] mb-1">Link de destino (opcional)</label>
+                <label className="block text-[11px] text-[#666] mb-1">
+                  Link de destino {creativeKind === 'post' ? '(obrigatório)' : '(opcional)'}
+                </label>
                 <input
                   value={creativeLinkUrl}
                   onChange={(e) => setCreativeLinkUrl(e.target.value)}
@@ -732,6 +945,36 @@ export default function MarketingCampaignDetail() {
                   className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none"
                 />
               </div>
+
+              {creativeKind === 'post' && (
+                <div>
+                  <label className="block text-[11px] text-[#666] mb-2">Escolha o post para impulsionar</label>
+                  {loadingPosts ? (
+                    <p className="text-[#555] text-sm">Carregando seus posts…</p>
+                  ) : igPosts.length === 0 ? (
+                    <p className="text-[#555] text-sm">Nenhum post encontrado (a conta do Instagram precisa estar vinculada a uma Página do Facebook).</p>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-2 max-h-56 overflow-y-auto">
+                      {igPosts.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setSelectedPostId(p.id)}
+                          title={p.caption || p.media_type || ''}
+                          className={`relative rounded-lg overflow-hidden border-2 transition-colors ${selectedPostId === p.id ? 'border-indigo-500' : 'border-transparent hover:border-white/[0.15]'}`}
+                        >
+                          {p.thumbnail_url ? (
+                            <img src={p.thumbnail_url} alt="" className="w-full h-16 object-cover" />
+                          ) : (
+                            <div className="w-full h-16 flex items-center justify-center bg-white/[0.03] text-[#444] text-[10px]">{p.media_type}</div>
+                          )}
+                          {selectedPostId === p.id && <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-indigo-500 text-white text-[10px] flex items-center justify-center">✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {creativeKind === 'image' && (
                 <div>

@@ -4,6 +4,26 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Accent neon (Aurora): remapeia toda a escala `indigo-*` já usada no app
+        // para o roxo neon — re-tinge o sistema inteiro sem mexer tela por tela.
+        indigo: {
+          50: '#faf5ff',
+          100: '#f3e8ff',
+          200: '#e9d5ff',
+          300: '#d8b4fe',
+          400: '#c9a7ff',
+          500: '#bd7cf9',
+          600: '#a855f7',
+          700: '#9333ea',
+          800: '#7e22ce',
+          900: '#4a1d7a',
+        },
+        // Cores neon da marca, disponíveis como classes (bg-neon-pink, text-neon-cyan…)
+        neon: {
+          pink: '#ff4fd8',
+          purple: '#a855f7',
+          cyan: '#00d4ff',
+        },
         brand: {
           50: '#eef2ff',
           100: '#e0e7ff',
