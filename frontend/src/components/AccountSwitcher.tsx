@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { ChevronsUpDown, Building2, Check, Briefcase } from 'lucide-react'
 import axios from 'axios'
+import { API_BASE } from '../services/api'
 
 interface ClientLite {
   id: string
@@ -54,14 +55,14 @@ export default function AccountSwitcher() {
     const token = agencyToken()
     if (!token) return
     try {
-      const me = (await axios.get('/api/v1/auth/me', authHeader(token))).data
+      const me = (await axios.get(`${API_BASE}/api/v1/auth/me`, authHeader(token))).data
       if (me.plan_type !== 'agencia') {
         setIsAgency(false)
         return
       }
       setIsAgency(true)
       setAgencyName(me.brand_name || 'Minha agência')
-      const list = (await axios.get('/api/v1/auth/clients', authHeader(token))).data
+      const list = (await axios.get(`${API_BASE}/api/v1/auth/clients`, authHeader(token))).data
       setClients(list.map((c: any) => ({ id: c.id, brand_name: c.brand_name })))
     } catch {
       setIsAgency(false)
@@ -81,7 +82,7 @@ export default function AccountSwitcher() {
       localStorage.setItem(AG.name, agencyName)
 
       const { data } = await axios.post(
-        `/api/v1/auth/clients/${client.id}/impersonate`, {}, authHeader(token),
+        `${API_BASE}/api/v1/auth/clients/${client.id}/impersonate`, {}, authHeader(token),
       )
       localStorage.setItem('access_token', data.access_token)
       localStorage.setItem('refresh_token', data.refresh_token)

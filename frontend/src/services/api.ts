@@ -1,7 +1,17 @@
 import axios from 'axios'
 
+// Em produção com o backend em host separado (ex.: Fly), defina VITE_API_URL no
+// build (ex.: https://api.seudominio.com). Em dev / docker-compose, deixe vazio:
+// os caminhos ficam relativos e o nginx faz o proxy de /api e /ws (comportamento atual).
+const RAW_API = (import.meta.env as any).VITE_API_URL as string | undefined
+export const API_BASE = (RAW_API || '').replace(/\/$/, '')
+
+// Base do WebSocket derivada do backend (ou da origem atual, no modo relativo).
+export const WS_BASE = (API_BASE || (typeof location !== 'undefined' ? location.origin : ''))
+  .replace(/^http/, 'ws')
+
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: `${API_BASE}/api/v1`,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -23,7 +33,7 @@ api.interceptors.response.use(
       if (refreshToken) {
         error.config._retry = true
         try {
-          const { data } = await axios.post('/api/v1/auth/refresh', { refresh_token: refreshToken })
+          const { data } = await axios.post(`${API_BASE}/api/v1/auth/refresh`, { refresh_token: refreshToken })
           localStorage.setItem('access_token', data.access_token)
           localStorage.setItem('refresh_token', data.refresh_token)
           error.config.headers.Authorization = `Bearer ${data.access_token}`
