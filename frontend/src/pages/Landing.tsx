@@ -32,10 +32,19 @@ export default function Landing() {
   ]
 
   const features = [
+    { icon: Zap, title: 'IA treinada no SEU negócio (RAG)', text: 'Suba seus PDFs (catálogo, FAQ, políticas) e a IA responde no WhatsApp com as informações reais da sua empresa — inclusive áudios, que ela transcreve. Se ficar indisponível, a conversa cai na fila humana na hora.' },
     { icon: Send, title: 'Disparo & Follow-ups', text: 'Importe leads por CSV, dispare templates para listas segmentadas e recupere quem não respondeu com follow-ups automáticos (3 a 14 dias).' },
-    { icon: Zap, title: 'IA que atende e qualifica', text: 'Bots por palavra-chave respondem no Direct e no WhatsApp, mandam o link certo e passam pro atendente humano na hora certa.' },
     { icon: Calendar, title: 'Cronograma de conteúdo', text: 'Agende posts do Instagram com data e hora e acompanhe o que está publicado, agendado ou falhou — num calendário só.' },
     { icon: BarChart3, title: 'Leads unificados', text: 'A mesma pessoa no Instagram e no WhatsApp vira um lead só. Histórico dos dois canais junto, atribuído ao anúncio de origem.' },
+  ]
+
+  const metaVsUs = [
+    { need: 'Postar, responder DM, rodar anúncio', meta: true, us: true },
+    { need: 'IA que responde com o conhecimento do SEU negócio', meta: false, us: true },
+    { need: 'Mesma pessoa do Insta + WhatsApp num lead só', meta: false, us: true },
+    { need: 'Custo por LEAD real de cada anúncio (não por clique)', meta: false, us: true },
+    { need: 'Disparo em massa + follow-up de quem não respondeu', meta: false, us: true },
+    { need: 'Vários clientes num painel só, com automações prontas', meta: false, us: true },
   ]
 
   const agencyPerks = [
@@ -158,6 +167,38 @@ export default function Landing() {
               </div>
             )
           })}
+        </div>
+      </section>
+
+      {/* por que não só a Meta grátis? */}
+      <section className="relative max-w-4xl mx-auto px-6 py-16">
+        <div className="text-center mb-10">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#00d4ff] mb-3">A pergunta certa</p>
+          <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-balance">
+            "Por que não usar só as ferramentas <Grad>grátis da Meta</Grad>?"
+          </h2>
+          <p className="text-[#8b8fa6] mt-4 max-w-2xl mx-auto">
+            Publicar e anunciar, a Meta já faz. O que ela não faz é a <b className="text-[#c9c9d6]">operação</b> que
+            transforma seguidor em cliente — é essa camada que entregamos.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-white/[0.08] bg-[#11131a] overflow-hidden">
+          <div className="grid grid-cols-[1fr_auto_auto] text-sm">
+            <div className="px-5 py-3 text-[#555] text-xs font-bold uppercase tracking-wider border-b border-white/[0.06]">O que você precisa</div>
+            <div className="px-5 py-3 text-[#555] text-xs font-bold uppercase tracking-wider border-b border-white/[0.06] text-center">Meta grátis</div>
+            <div className="px-5 py-3 text-xs font-bold uppercase tracking-wider border-b border-white/[0.06] text-center"><Grad>adStudioAI</Grad></div>
+            {metaVsUs.map((row) => (
+              <div key={row.need} className="contents">
+                <div className="px-5 py-3.5 text-[#c9c9d6] border-b border-white/[0.04]">{row.need}</div>
+                <div className="px-5 py-3.5 text-center border-b border-white/[0.04]">
+                  {row.meta ? <Check size={16} className="inline text-[#5c5f70]" /> : <span className="text-[#444]">—</span>}
+                </div>
+                <div className="px-5 py-3.5 text-center border-b border-white/[0.04]">
+                  {row.us && <Check size={16} className="inline text-[#00d4ff]" />}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

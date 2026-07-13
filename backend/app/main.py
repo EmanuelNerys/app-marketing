@@ -14,6 +14,7 @@ from app.routes import auth_jwt, conversations, messages, ws, whatsapp, payments
 from app.routes import auth_email
 from app.routes import marketing
 from app.routes import studio
+from app.routes import ai as ai_routes
 
 # Register all models with Base.metadata so create_all creates every table
 import app.models.meta_connection   # noqa: F401
@@ -23,6 +24,7 @@ import app.models.message           # noqa: F401
 import app.models.subscription      # noqa: F401
 import app.models.schedule          # noqa: F401
 import app.models.client_assignment # noqa: F401
+import app.models.ai                # noqa: F401
 
 logging.basicConfig(level=logging.INFO)
 
@@ -66,6 +68,10 @@ _MIGRATIONS = [
 
     # Conversas: bot ligado/desligado por conversa (filas bot/espera/minhas)
     "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_active BOOLEAN NOT NULL DEFAULT TRUE",
+
+    # Módulos bloqueados por conta (agência-mãe controla as dependentes;
+    # super admin controla qualquer conta)
+    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS blocked_modules JSON",
 ]
 
 
@@ -85,6 +91,9 @@ async def lifespan(app: FastAPI):
         await scheduler_task
     except asyncio.CancelledError:
         pass
+    # Graceful shutdown: cancela os timers de debounce pendentes da IA
+    from app.services.ai_debounce import shutdown as ai_shutdown
+    await ai_shutdown()
     await engine.dispose()
 
 
@@ -113,6 +122,14 @@ async def health():
     return {"status": "ok"}
 
 
+# Guard de módulos: 403 quando a agência-mãe/super admin bloqueou o módulo do
+# tenant. Aplicado nos routers 100% autenticados. O Instagram NÃO recebe guard
+# de router (tem a rota pública /instagram/uploads/* que a Meta busca) — o
+# bloqueio de Instagram é aplicado no frontend via /auth/me.
+from fastapi import Depends as _Depends
+from app.core.modules import require_module as _require_module
+
+
 # Meta / legacy onboarding
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(webhook.router, prefix="/api/v1")
@@ -126,7 +143,8 @@ app.include_router(privacy.router, prefix="/api/v1")
 app.include_router(auth_jwt.router, prefix="/api/v1")
 app.include_router(conversations.router, prefix="/api/v1")
 app.include_router(messages.router, prefix="/api/v1")
-app.include_router(whatsapp.router, prefix="/api/v1")
+app.include_router(whatsapp.router, prefix="/api/v1",
+                   dependencies=[_Depends(_require_module("whatsapp"))])
 app.include_router(tenants.router, prefix="/api/v1")
 app.include_router(payments.router)
 app.include_router(clients.router, prefix="/api/v1")
@@ -141,10 +159,15 @@ app.include_router(instagram_api.router, prefix="/api/v1")
 app.include_router(auth_email.router, prefix="/api/v1")
 
 # Marketing API (campaigns, ad sets, creatives, ads)
-app.include_router(marketing.router, prefix="/api/v1")
+app.include_router(marketing.router, prefix="/api/v1",
+                   dependencies=[_Depends(_require_module("ads"))])
 
 # Studio de Criação (geração de vídeo com IA)
 app.include_router(studio.router, prefix="/api/v1")
+
+# IA de atendimento (Gemini + RAG): config, base de conhecimento, uso
+app.include_router(ai_routes.router, prefix="/api/v1",
+                   dependencies=[_Depends(_require_module("ia"))])
 
 # WebSocket (sem prefix /api/v1 — não usa path prefix)
 app.include_router(ws.router)

@@ -2,7 +2,12 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _coerce_optional_str(v):
+    """Graph às vezes devolve orçamento/lance como int; normaliza pra string."""
+    return None if v is None else str(v)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -57,6 +62,8 @@ class CampaignOut(BaseModel):
     start_time: str | None = None
     stop_time: str | None = None
 
+    _coerce = field_validator("daily_budget", "lifetime_budget", mode="before")(_coerce_optional_str)
+
 
 class TargetingSpec(BaseModel):
     age_min: int = Field(default=18, ge=13, le=65)
@@ -94,6 +101,8 @@ class AdSetOut(BaseModel):
     billing_event: str | None = None
     optimization_goal: str | None = None
     end_time: str | None = None
+
+    _coerce = field_validator("daily_budget", "lifetime_budget", "bid_amount", mode="before")(_coerce_optional_str)
 
 
 class CarouselItem(BaseModel):
@@ -230,6 +239,12 @@ def _require_ad_account(conn: MetaConnection) -> str:
     if not conn.ad_account_id:
         raise HTTPException(status_code=400, detail="Conta de anúncios não configurada.")
     return conn.ad_account_id
+
+
+def _meta_error(result: dict, default: str) -> str:
+    """Extrai a mensagem mais amigável do erro da Graph (prioriza error_user_msg)."""
+    err = (result or {}).get("error", {}) or {}
+    return err.get("error_user_msg") or err.get("error_user_title") or err.get("message") or default
 
 
 def _build_targeting(t: TargetingSpec) -> dict:
@@ -415,7 +430,7 @@ async def api_create_campaign(
         is_adset_budget_sharing_enabled=body.is_adset_budget_sharing_enabled,
     )
     if "id" not in result:
-        raise HTTPException(status_code=400, detail=f"Erro ao criar campanha: {result}")
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao criar campanha"))
     return {"success": True, "campaign_id": result["id"]}
 
 
@@ -439,7 +454,7 @@ async def api_update_campaign(
 
     result = await ads_service.update_campaign(token, campaign_id, **fields)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao atualizar campanha."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao atualizar campanha."))
     return {"success": True}
 
 
@@ -452,7 +467,7 @@ async def api_delete_campaign(
     _, token = await _get_ads_connection(current_user, db)
     result = await ads_service.delete_campaign(token, campaign_id)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao excluir campanha."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao excluir campanha."))
     return {"success": True}
 
 
@@ -466,7 +481,7 @@ async def api_copy_campaign(
     _, token = await _get_ads_connection(current_user, db)
     result = await ads_service.copy_object(token, campaign_id, deep_copy=True)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao duplicar campanha."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao duplicar campanha."))
     return {"success": True, "result": result}
 
 
@@ -539,7 +554,7 @@ async def api_create_ad_set(
         bid_amount=body.bid_amount_cents, end_time=body.end_time,
     )
     if "id" not in result:
-        raise HTTPException(status_code=400, detail=f"Erro ao criar conjunto: {result}")
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao criar conjunto"))
     return {"success": True, "ad_set_id": result["id"]}
 
 
@@ -565,7 +580,7 @@ async def api_update_ad_set(
 
     result = await ads_service.update_ad_set(token, ad_set_id, **fields)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao atualizar conjunto."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao atualizar conjunto."))
     return {"success": True}
 
 
@@ -578,7 +593,7 @@ async def api_delete_ad_set(
     _, token = await _get_ads_connection(current_user, db)
     result = await ads_service.delete_ad_set(token, ad_set_id)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao excluir conjunto."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao excluir conjunto."))
     return {"success": True}
 
 
@@ -592,7 +607,7 @@ async def api_copy_ad_set(
     _, token = await _get_ads_connection(current_user, db)
     result = await ads_service.copy_object(token, ad_set_id, deep_copy=True)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao duplicar conjunto."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao duplicar conjunto."))
     return {"success": True, "result": result}
 
 
@@ -688,7 +703,7 @@ async def api_create_creative(
             body.source_instagram_media_id, body.link_url, cta_type=body.cta_type,
         )
         if "id" not in result:
-            raise HTTPException(status_code=400, detail=f"Erro ao criar criativo do post: {result}")
+            raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao criar criativo do post"))
         return {"success": True, "creative_id": result["id"]}
 
     if not body.message.strip():
@@ -706,7 +721,7 @@ async def api_create_creative(
         carousel_items=[i.model_dump() for i in body.carousel_items] if body.carousel_items else None,
     )
     if "id" not in result:
-        raise HTTPException(status_code=400, detail=f"Erro ao criar criativo: {result}")
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao criar criativo"))
     return {"success": True, "creative_id": result["id"]}
 
 
@@ -720,7 +735,7 @@ async def api_create_ad(
     ad_account_id = _require_ad_account(conn)
     result = await ads_service.create_ad(token, ad_account_id, body.ad_set_id, body.creative_id, body.name, body.status)
     if "id" not in result:
-        raise HTTPException(status_code=400, detail=f"Erro ao criar anúncio: {result}")
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao criar anúncio"))
     return {"success": True, "ad_id": result["id"]}
 
 
@@ -742,7 +757,7 @@ async def api_update_ad(
 
     result = await ads_service.update_ad(token, ad_id, **fields)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao atualizar anúncio."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao atualizar anúncio."))
     return {"success": True}
 
 
@@ -755,7 +770,7 @@ async def api_delete_ad(
     _, token = await _get_ads_connection(current_user, db)
     result = await ads_service.delete_ad(token, ad_id)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao excluir anúncio."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao excluir anúncio."))
     return {"success": True}
 
 
@@ -769,7 +784,7 @@ async def api_copy_ad(
     _, token = await _get_ads_connection(current_user, db)
     result = await ads_service.copy_object(token, ad_id, deep_copy=False)
     if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"].get("message", "Erro ao duplicar anúncio."))
+        raise HTTPException(status_code=400, detail=_meta_error(result, "Erro ao duplicar anúncio."))
     return {"success": True, "result": result}
 
 

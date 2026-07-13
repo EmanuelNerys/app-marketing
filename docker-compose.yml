@@ -28,6 +28,21 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------
+  # Redis — debounce da IA, rate limit e dedup de webhook
+  # ---------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: adstudioai-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------
   # Backend FastAPI
   # ---------------------------------------------------------
   backend:
@@ -38,6 +53,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-marketing_user}:${POSTGRES_PASSWORD:-marketing_pass}@postgres:5432/${POSTGRES_DB:-adstudioai}
+      REDIS_URL: redis://redis:6379/0
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       UVICORN_WORKERS: ${UVICORN_WORKERS:-4}
@@ -45,6 +61,8 @@ services:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - ./backend:/app

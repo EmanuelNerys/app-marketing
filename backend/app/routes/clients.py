@@ -23,6 +23,9 @@ class ClientCreateRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=100)
     password: str = Field(..., min_length=6)
     full_name: str | None = None
+    # Email do dono da empresa — recebe o link de verificação (Resend).
+    # O login do dono só funciona depois de verificar.
+    email: str = Field(..., min_length=5, max_length=255)
 
 
 class ClientOut(BaseModel):
@@ -32,6 +35,10 @@ class ClientOut(BaseModel):
     full_name: str | None
     is_active: bool
     plan: str = "free"
+    plan_type: str = "dependente"
+    email: str | None = None
+    email_verified: bool = False
+    blocked_modules: list[str] = Field(default_factory=list)
     created_at: datetime
 
     class Config:
@@ -91,20 +98,28 @@ async def create_client(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username já em uso.")
 
+    email = body.email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=422, detail="Email do dono inválido.")
+
     # Create sub-account linked to the agency.
-    # A managed company runs a single business, so it is always "autonomo"
-    # (no Clients page, cannot create its own sub-accounts).
+    # Empresa gerenciada nasce como "dependente": marcada como filha da
+    # agência, sem página de Clientes, e com os módulos controláveis pela mãe.
     client_account = Account(
         id=str(uuid.uuid4()),
         brand_name=body.brand_name,
         parent_account_id=current_user.tenant_id,
-        plan_type="autonomo",
+        plan_type="dependente",
+        customer_email=email,
+        customer_name=body.full_name,
+        blocked_modules=[],
         is_active=True,
     )
     db.add(client_account)
     await db.flush()
 
-    # Create user for the sub-account
+    # Dono da empresa-filha: só loga depois de verificar o email (Resend)
+    verification_token = str(uuid.uuid4()) + str(uuid.uuid4()).replace("-", "")
     user = User(
         id=str(uuid.uuid4()),
         tenant_id=client_account.id,
@@ -112,9 +127,18 @@ async def create_client(
         password_hash=hash_password(body.password),
         full_name=body.full_name,
         role="admin",
+        is_verified=False,
+        verification_token=verification_token,
     )
     db.add(user)
     await db.flush()
+
+    # Envia o link de verificação para o email do dono (não bloqueante)
+    try:
+        from app.services.email_service import send_verification_email
+        await send_verification_email(email, verification_token, body.full_name or body.brand_name)
+    except Exception as exc:
+        logger.warning("Falha ao enviar email de verificação do cliente %s: %s", client_account.id, exc)
 
     # Create free subscription for the client
     sub = Subscription(
@@ -143,6 +167,10 @@ async def create_client(
         full_name=body.full_name,
         is_active=True,
         plan="free",
+        plan_type="dependente",
+        email=email,
+        email_verified=False,
+        blocked_modules=[],
         created_at=client_account.created_at,
     )
 
@@ -188,6 +216,10 @@ async def list_clients(
                 full_name=admin_user.full_name if admin_user else None,
                 is_active=acc.is_active,
                 plan=plan or "free",
+                plan_type=acc.plan_type,
+                email=acc.customer_email,
+                email_verified=bool(admin_user and admin_user.is_verified),
+                blocked_modules=list(acc.blocked_modules or []),
                 created_at=acc.created_at,
             )
         )
@@ -274,6 +306,73 @@ async def delete_client(
     client_account.is_active = False
     await db.commit()
     logger.info("Agency %s deactivated client %s", current_user.tenant_id, client_id)
+
+
+# ---------------------------------------------------------------------------
+# Módulos — a agência-mãe bloqueia módulos das empresas dependentes;
+# o super admin (SUPER_ADMIN_EMAILS) faz o mesmo com qualquer conta
+# ---------------------------------------------------------------------------
+
+from app.core.modules import AVAILABLE_MODULES, is_super_admin
+
+
+class ModulesUpdateRequest(BaseModel):
+    blocked_modules: list[str] = Field(default_factory=list)
+
+
+async def _get_manageable_account(
+    account_id: str, current_user: User, db: AsyncSession
+) -> Account:
+    """Conta que o usuário pode gerenciar: super admin → qualquer; agência
+    (admin) → apenas as empresas-filhas dela."""
+    result = await db.execute(select(Account).where(Account.id == account_id))
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="Conta não encontrada.")
+
+    if is_super_admin(current_user):
+        return target
+
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas admins podem gerenciar módulos.")
+    if target.parent_account_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Esta empresa não pertence à sua agência.")
+    return target
+
+
+@router.get("/{client_id}/modules")
+async def get_client_modules(
+    client_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    target = await _get_manageable_account(client_id, current_user, db)
+    return {
+        "account_id": target.id,
+        "brand_name": target.brand_name,
+        "blocked_modules": list(target.blocked_modules or []),
+        "available_modules": AVAILABLE_MODULES,
+    }
+
+
+@router.put("/{client_id}/modules")
+async def update_client_modules(
+    client_id: str,
+    body: ModulesUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    target = await _get_manageable_account(client_id, current_user, db)
+
+    invalid = set(body.blocked_modules) - set(AVAILABLE_MODULES)
+    if invalid:
+        raise HTTPException(status_code=422, detail=f"Módulos inválidos: {', '.join(sorted(invalid))}")
+
+    target.blocked_modules = sorted(set(body.blocked_modules))
+    await db.commit()
+    logger.info("Usuário %s definiu módulos bloqueados de %s: %s",
+                current_user.id, target.id, target.blocked_modules)
+    return {"account_id": target.id, "blocked_modules": target.blocked_modules}
 
 
 # ---------------------------------------------------------------------------

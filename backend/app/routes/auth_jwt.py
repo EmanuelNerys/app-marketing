@@ -60,6 +60,10 @@ class UserOut(BaseModel):
     is_active: bool
     plan_type: str | None = None
     brand_name: str | None = None
+    # Módulos bloqueados pela agência-mãe/super admin (o frontend esconde)
+    blocked_modules: list[str] = Field(default_factory=list)
+    # Super admin do sistema (SUPER_ADMIN_EMAILS)
+    is_super_admin: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +147,17 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Conta desativada.")
 
+    # Dono de empresa dependente (criada pela agência) só entra após verificar
+    # o email — o link chega pelo Resend na criação da empresa.
+    if not user.is_verified:
+        acc_result = await db.execute(select(Account).where(Account.id == user.tenant_id))
+        acc = acc_result.scalar_one_or_none()
+        if acc and acc.plan_type == "dependente":
+            raise HTTPException(
+                status_code=403,
+                detail="Verifique seu email para ativar o acesso — enviamos o link de confirmação.",
+            )
+
     return TokenResponse(
         access_token=create_access_token(user.id, user.tenant_id, user.role),
         refresh_token=create_refresh_token(user.id, user.tenant_id),
@@ -188,6 +203,7 @@ async def me(
 ):
     result = await db.execute(select(Account).where(Account.id == current_user.tenant_id))
     account = result.scalar_one_or_none()
+    from app.core.modules import is_super_admin
     return UserOut(
         id=current_user.id,
         tenant_id=current_user.tenant_id,
@@ -197,6 +213,8 @@ async def me(
         is_active=current_user.is_active,
         plan_type=account.plan_type if account else None,
         brand_name=account.brand_name if account else None,
+        blocked_modules=list(account.blocked_modules or []) if account else [],
+        is_super_admin=is_super_admin(current_user),
     )
 
 

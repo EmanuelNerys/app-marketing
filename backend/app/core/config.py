@@ -68,6 +68,19 @@ class Settings(BaseSettings):
     email_from_name: str = "adStudioAI"
     app_url: str = "http://localhost:5173"
 
+    # Super admins do sistema (emails separados por vírgula). Podem gerenciar
+    # os módulos bloqueados de QUALQUER conta (agências e empresas).
+    super_admin_emails: str = ""
+
+    # IA (Gemini + RAG). A API key da Gemini é POR TENANT (fica no banco,
+    # criptografada) — aqui só os defaults de comportamento.
+    redis_url: str = ""  # ex.: redis://redis:6379/0 (vazio = fallback em memória)
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_embedding_model: str = "text-embedding-004"
+    ai_debounce_seconds: float = 3.0
+    ai_request_timeout: float = 10.0
+    ai_default_token_limit: int = 1_000_000  # tokens/mês incluídos por tenant
+
     @property
     def meta_graph_url(self) -> str:
         return f"https://graph.facebook.com/{self.meta_api_version}"

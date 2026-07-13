@@ -8,6 +8,7 @@ import ConexaoMeta from './pages/ConexaoMeta'
 import Leads from './pages/Leads'
 import Configuracoes from './pages/Configuracoes'
 import PublicarInstagram from './pages/PublicarInstagram'
+import AIConfig from './pages/AIConfig'
 import Privacy from './pages/Privacy'
 import Pricing from './pages/Pricing'
 import CompletarCadastro from './pages/CompletarCadastro'
@@ -45,6 +46,7 @@ export default function App() {
           {/* Publicar + Automação foram unificados em /app/publicar */}
           <Route path="/app/automacao" element={<Navigate to="/app/publicar" replace />} />
           <Route path="/app/whatsapp" element={<WhatsApp />} />
+          <Route path="/app/ia" element={<AIConfig />} />
           <Route path="/app/instagram-dm" element={<InstagramInbox />} />
           <Route path="/app/templates" element={<Templates />} />
           <Route path="/app/equipe" element={<Equipe />} />

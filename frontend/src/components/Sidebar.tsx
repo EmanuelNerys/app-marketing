@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Clapperboard, Megaphone, Link2, Send,
   Users, Settings, CreditCard, Building2, LogOut,
   ChevronRight, ChevronDown, MessageSquare, FileText, Clock,
-  Headphones, Camera,
+  Headphones, Camera, Zap,
   type LucideIcon,
 } from 'lucide-react'
 import api from '../services/api'
@@ -38,19 +38,31 @@ export default function Sidebar() {
   const location = useLocation()
   const [planType, setPlanType] = useState<string | null>(null)
   const [waNumber, setWaNumber] = useState<string | null>(null)
+  const [blockedModules, setBlockedModules] = useState<string[]>([])
 
+  const blocked = (m: string) => blockedModules.includes(m)
+
+  // Módulos bloqueados pela agência-mãe/super admin somem do menu
+  // (o backend também bloqueia as rotas com 403).
   const groups: NavGroup[] = [
     {
       id: 'atendimento',
       label: 'Atendimento ao Cliente',
       icon: Headphones,
       items: [
-        { to: '/app/whatsapp', label: 'WhatsApp', icon: MessageSquare, sub: waNumber ?? undefined },
-        { to: '/app/templates', label: 'Templates', icon: FileText },
-        { to: '/app/followups', label: 'Follow-ups', icon: Clock },
+        ...(!blocked('whatsapp') ? [
+          { to: '/app/whatsapp', label: 'WhatsApp', icon: MessageSquare, sub: waNumber ?? undefined },
+        ] : []),
+        ...(!blocked('ia') ? [
+          { to: '/app/ia', label: 'IA & Conhecimento', icon: Zap },
+        ] : []),
+        ...(!blocked('whatsapp') ? [
+          { to: '/app/templates', label: 'Templates', icon: FileText },
+          { to: '/app/followups', label: 'Follow-ups', icon: Clock },
+        ] : []),
       ],
     },
-    {
+    ...(!blocked('instagram') ? [{
       id: 'instagram',
       label: 'Instagram',
       icon: Camera,
@@ -58,16 +70,16 @@ export default function Sidebar() {
         { to: '/app/publicar', label: 'Publicar & Automação', icon: Send },
         { to: '/app/instagram-dm', label: 'Direct', icon: MessageSquare },
       ],
-    },
-    {
+    }] : []),
+    ...(!blocked('ads') ? [{
       id: 'ads',
       label: 'Meta Ads',
       icon: Megaphone,
       items: [
         { to: '/app/marketing', label: 'Campanhas', icon: Megaphone },
       ],
-    },
-  ]
+    }] : []),
+  ].filter((g) => g.items.length > 0)
 
   // Abre por padrão o grupo que contém a rota atual
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
@@ -81,6 +93,7 @@ export default function Sidebar() {
   useEffect(() => {
     api.get('/auth/me').then(({ data }) => {
       if (data?.plan_type) setPlanType(data.plan_type)
+      if (Array.isArray(data?.blocked_modules)) setBlockedModules(data.blocked_modules)
     }).catch(() => {})
 
     // Número do WhatsApp conectado (via Meta) — mostrado sob o item WhatsApp

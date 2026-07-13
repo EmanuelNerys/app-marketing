@@ -36,10 +36,11 @@ interface Message {
   created_at: string
 }
 
-type Queue = 'bot' | 'espera' | 'minhas'
+// No Instagram o funil dispara só 2 DMs e entrega ao humano — não há fila de
+// bot conversacional aqui (isso é do WhatsApp). Filas: Espera e Minhas.
+type Queue = 'espera' | 'minhas'
 
 const QUEUES: { id: Queue; label: string; icon: typeof Bot; color: string }[] = [
-  { id: 'bot', label: 'Bot', icon: Bot, color: 'text-emerald-400' },
   { id: 'espera', label: 'Espera', icon: Clock, color: 'text-amber-400' },
   { id: 'minhas', label: 'Minhas', icon: UserCheck, color: 'text-indigo-400' },
 ]
@@ -110,11 +111,10 @@ export default function InstagramInbox() {
 
   function queueOf(c: Conversation): Queue {
     if (c.atendente_id && c.atendente_id === myId) return 'minhas'
-    if (c.bot_active) return 'bot'
     return 'espera'
   }
 
-  const counts: Record<Queue, number> = { bot: 0, espera: 0, minhas: 0 }
+  const counts: Record<Queue, number> = { espera: 0, minhas: 0 }
   convs.forEach((c) => { counts[queueOf(c)]++ })
   const visible = convs.filter((c) => queueOf(c) === queue)
 

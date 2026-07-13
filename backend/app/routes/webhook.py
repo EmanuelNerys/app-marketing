@@ -792,6 +792,12 @@ async def handle_whatsapp_message(
         elif msg_type == "unsupported":
             text_body = "[mensagem não suportada pelo WhatsApp Business]"
 
+        # Idempotência: a Meta reenvia webhooks — não processar a mesma mensagem 2x
+        from app.services.ai_guard import dedupe_message
+        if wamid and await dedupe_message(wamid):
+            logger.info("Webhook duplicado ignorado (wamid=%s)", wamid)
+            continue
+
         # Quote: cliente respondeu citando uma mensagem anterior
         context_text: str | None = None
         ctx_wamid = msg_data.get("context", {}).get("id")
@@ -906,9 +912,11 @@ async def handle_whatsapp_message(
         })
 
         # Auto-reply por keyword para WhatsApp (se configurado e bot ativo na conversa)
+        kw_matched = False
         if text_body and conv.bot_active:
             matched = await _match_automation(tenant_id, text_body, db)
             if matched:
+                kw_matched = True
                 try:
                     token = decrypt_token(conn.access_token_encrypted)
                     from app.services import whatsapp_service
@@ -956,6 +964,16 @@ async def handle_whatsapp_message(
                         })
                 except Exception as exc:
                     logger.warning("Falha no auto-reply WhatsApp: %s", exc)
+
+        # IA (Gemini + RAG): entra quando o bot está ativo e NENHUMA automação
+        # por palavra-chave respondeu. Faz guards (anti-loop/rate limit),
+        # transcreve áudio e agenda o debounce de 3s — a resposta sai no job.
+        if conv.bot_active and not kw_matched:
+            try:
+                from app.services import ai_agent
+                await ai_agent.handle_inbound(db, conn, tenant_id, conv.id, msg)
+            except Exception as exc:
+                logger.warning("IA: falha ao enfileirar mensagem %s: %s", wamid, exc)
 
         await dispatch_event("whatsapp_message", tenant_id, msg_data)
 
@@ -1058,7 +1076,7 @@ async def _resolve_tenant_by_page_id(page_id: str, db: AsyncSession) -> Account 
     isso checamos as duas colunas.
     """
     result = await db.execute(select(Account).where(Account.meta_page_id == page_id))
-    account = result.scalar_one_or_none()
+    account = result.scalars().first()
     if account:
         return account
 
@@ -1073,10 +1091,10 @@ async def _resolve_tenant_by_page_id(page_id: str, db: AsyncSession) -> Account 
             )
         )
     )
-    connection = conn_result.scalar_one_or_none()
+    connection = conn_result.scalars().first()
     if connection:
         acc_result = await db.execute(select(Account).where(Account.id == connection.account_id))
-        return acc_result.scalar_one_or_none()
+        return acc_result.scalars().first()
 
     return None
 

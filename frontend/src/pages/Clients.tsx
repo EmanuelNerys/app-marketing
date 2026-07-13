@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   Building2, Plus, ExternalLink, Trash2, Users, TrendingUp,
   CheckCircle, Wifi, WifiOff, X, Eye, EyeOff,
-  BarChart3,
+  BarChart3, Blocks, MailCheck, MailWarning,
 } from 'lucide-react'
 import api from '../services/api'
 
@@ -13,8 +13,20 @@ interface Client {
   full_name: string | null
   is_active: boolean
   plan: string
+  plan_type: string
+  email: string | null
+  email_verified: boolean
+  blocked_modules: string[]
   created_at: string
 }
+
+// Módulos que a agência pode bloquear por cliente (espelha o backend)
+const MODULES: { key: string; label: string; desc: string }[] = [
+  { key: 'whatsapp', label: 'WhatsApp', desc: 'Atendimento, templates, follow-ups e disparos' },
+  { key: 'instagram', label: 'Instagram', desc: 'Publicar, automação e Direct' },
+  { key: 'ads', label: 'Meta Ads', desc: 'Campanhas, anúncios e métricas' },
+  { key: 'ia', label: 'IA de atendimento', desc: 'Gemini + base de conhecimento (RAG)' },
+]
 
 interface AgencyStat {
   id: string
@@ -78,9 +90,15 @@ export default function Clients() {
   const [createUsername, setCreateUsername] = useState('')
   const [createPassword, setCreatePassword] = useState('')
   const [createFullName, setCreateFullName] = useState('')
+  const [createEmail, setCreateEmail] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
+
+  // modal módulos (bloquear/liberar por cliente)
+  const [modulesOf, setModulesOf] = useState<Client | null>(null)
+  const [blockedDraft, setBlockedDraft] = useState<string[]>([])
+  const [savingModules, setSavingModules] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -103,8 +121,12 @@ export default function Clients() {
   async function handleCreate(e: React.SyntheticEvent) {
     e.preventDefault()
     setCreateError('')
-    if (!createName.trim() || !createUsername.trim() || !createPassword.trim()) {
+    if (!createName.trim() || !createUsername.trim() || !createPassword.trim() || !createEmail.trim()) {
       setCreateError('Preencha todos os campos obrigatórios.')
+      return
+    }
+    if (!createEmail.includes('@')) {
+      setCreateError('Informe um email válido — o dono recebe o link de verificação nele.')
       return
     }
     setCreating(true)
@@ -114,17 +136,38 @@ export default function Clients() {
         username: createUsername.trim(),
         password: createPassword,
         full_name: createFullName.trim() || null,
+        email: createEmail.trim(),
       })
       setShowCreate(false)
       setCreateName('')
       setCreateUsername('')
       setCreatePassword('')
       setCreateFullName('')
+      setCreateEmail('')
       await loadData()
     } catch (err: any) {
       setCreateError(err.response?.data?.detail || 'Erro ao criar cliente.')
     } finally {
       setCreating(false)
+    }
+  }
+
+  function openModules(client: Client) {
+    setModulesOf(client)
+    setBlockedDraft([...(client.blocked_modules || [])])
+  }
+
+  async function saveModules() {
+    if (!modulesOf) return
+    setSavingModules(true)
+    try {
+      await api.put(`/auth/clients/${modulesOf.id}/modules`, { blocked_modules: blockedDraft })
+      setModulesOf(null)
+      await loadData()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Erro ao salvar os módulos.')
+    } finally {
+      setSavingModules(false)
     }
   }
 
@@ -290,6 +333,27 @@ export default function Clients() {
                       <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${planColor[client.plan] ?? planColor.free}`}>
                         {planLabel[client.plan] ?? client.plan}
                       </span>
+                      {client.plan_type === 'dependente' && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-indigo-900/20 text-indigo-300 border-indigo-500/20">
+                          Dependente
+                        </span>
+                      )}
+                      {client.email && (
+                        client.email_verified ? (
+                          <span title={`${client.email} — verificado`} className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-green-900/20 text-green-400 border-green-500/20 flex items-center gap-1">
+                            <MailCheck size={10} /> verificado
+                          </span>
+                        ) : (
+                          <span title={`Aguardando o dono confirmar ${client.email}`} className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-amber-900/20 text-amber-400 border-amber-500/20 flex items-center gap-1">
+                            <MailWarning size={10} /> email pendente
+                          </span>
+                        )
+                      )}
+                      {(client.blocked_modules?.length ?? 0) > 0 && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border bg-red-900/20 text-red-400 border-red-500/20">
+                          {client.blocked_modules.length} módulo(s) off
+                        </span>
+                      )}
                     </div>
                     <p className="text-[#555] text-xs mt-0.5">@{client.username}</p>
                   </div>
@@ -323,6 +387,14 @@ export default function Clients() {
 
                   {/* Actions */}
                   <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => openModules(client)}
+                      title="Bloquear/liberar módulos deste cliente"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.08] text-[#8a8a9e] hover:text-white rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      <Blocks size={12} />
+                      Módulos
+                    </button>
                     <button
                       onClick={() => handleImpersonate(client.id)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition-colors"
@@ -389,6 +461,20 @@ export default function Clients() {
               </div>
 
               <div>
+                <label className="block text-xs font-medium text-[#666] mb-1.5">Email do dono *</label>
+                <input
+                  type="email"
+                  value={createEmail}
+                  onChange={(e) => setCreateEmail(e.target.value)}
+                  placeholder="dono@empresa.com"
+                  className="w-full px-4 py-2.5 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none placeholder-[#333]"
+                />
+                <p className="text-[10px] text-[#555] mt-1">
+                  O dono recebe um link de verificação neste email — o login dele só ativa depois de confirmar.
+                </p>
+              </div>
+
+              <div>
                 <label className="block text-xs font-medium text-[#666] mb-1.5">Nome de usuário *</label>
                 <input
                   type="text"
@@ -447,6 +533,66 @@ export default function Clients() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: módulos do cliente (bloquear/liberar) */}
+      {modulesOf && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-7 w-full max-w-md">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <Blocks size={16} className="text-indigo-400" /> Módulos — {modulesOf.brand_name}
+              </h3>
+              <button onClick={() => setModulesOf(null)} className="text-[#444] hover:text-[#888] transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-[#555] mb-5">
+              Desligue um módulo para escondê-lo e bloqueá-lo por completo para este cliente.
+            </p>
+
+            <div className="space-y-3">
+              {MODULES.map((m) => {
+                const blocked = blockedDraft.includes(m.key)
+                return (
+                  <div key={m.key} className="flex items-center justify-between gap-3 bg-[#0a0a0f] border border-white/[0.05] rounded-lg p-3">
+                    <div className="min-w-0">
+                      <p className={`text-sm font-medium ${blocked ? 'text-[#555] line-through' : 'text-[#e2e2e8]'}`}>{m.label}</p>
+                      <p className="text-[11px] text-[#555]">{m.desc}</p>
+                    </div>
+                    <button
+                      onClick={() =>
+                        setBlockedDraft((prev) =>
+                          blocked ? prev.filter((k) => k !== m.key) : [...prev, m.key]
+                        )
+                      }
+                      title={blocked ? 'Bloqueado — clique para liberar' : 'Liberado — clique para bloquear'}
+                      className={`w-11 h-6 rounded-full relative transition-colors shrink-0 ${blocked ? 'bg-white/[0.08]' : 'bg-green-500'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${blocked ? 'left-0.5' : 'left-[22px]'}`} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="flex gap-3 pt-5">
+              <button
+                onClick={() => setModulesOf(null)}
+                className="flex-1 py-2.5 border border-white/[0.08] text-[#666] hover:text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveModules}
+                disabled={savingModules}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                {savingModules ? 'Salvando…' : 'Salvar módulos'}
+              </button>
+            </div>
           </div>
         </div>
       )}
