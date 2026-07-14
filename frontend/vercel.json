@@ -3,6 +3,11 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "build": {
+    "env": {
+      "VITE_API_URL": "https://api.adsstudio.com.br"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
