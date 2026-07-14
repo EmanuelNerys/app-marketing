@@ -1,0 +1,39 @@
+# ============================================================
+# Fly.io — backend FastAPI do adStudioAI
+# Deploy:  fly deploy
+# ============================================================
+app            = "adstudioai-backend"
+primary_region = "gru" # São Paulo
+
+[build]
+  dockerfile = "Dockerfile"
+
+# ---- Variáveis NÃO sensíveis (segredos vão via `fly secrets set`) ----
+[env]
+  APP_PORT         = "8000"
+  APP_HOST         = "0.0.0.0"
+  UVICORN_WORKERS  = "2"
+  DEBUG            = "False"
+  APP_NAME         = "adStudioAI"
+  META_API_VERSION = "v21.0"
+
+# ---- Serviço HTTP público (TLS terminado pelo Fly) ----
+[http_service]
+  internal_port       = 8000
+  force_https         = true
+  auto_stop_machines  = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes           = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval     = "15s"
+    method       = "GET"
+    path         = "/health"
+    timeout      = "3s"
+
+# ---- Tamanho da VM ----
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "512mb"
