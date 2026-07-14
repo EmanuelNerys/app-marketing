@@ -42,6 +42,22 @@ class Settings(BaseSettings):
     # Meta precisa buscar ao publicar posts. Em dev, é o domínio do ngrok.
     public_base_url: str = ""
 
+    # Supabase Storage — armazena as mídias de post do Instagram fora do disco
+    # (o disco do Fly é efêmero). Se vazio, cai no fallback de disco local.
+    #   supabase_url:         https://<ref>.supabase.co
+    #   supabase_service_key: service_role key (NÃO a anon key) — só no backend
+    #   supabase_bucket:      nome do bucket PÚBLICO (a Meta precisa baixar a URL)
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+    supabase_bucket: str = "post-media"
+
+    @property
+    def storage_enabled(self) -> bool:
+        return bool(self.supabase_url and self.supabase_service_key)
+
+    # Janela máxima (em dias) para agendar um post no futuro.
+    max_schedule_days: int = 15
+
     @property
     def public_backend_url(self) -> str:
         """URL pública do backend, com fallback para o domínio do ngrok."""
@@ -104,6 +120,9 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        # Ignora envs extras (ex.: APP_HOST/APP_PORT/UVICORN_WORKERS injetadas
+        # pelo docker-compose e pelo Fly) em vez de derrubar o app na inicialização.
+        extra = "ignore"
 
 
 settings = Settings()

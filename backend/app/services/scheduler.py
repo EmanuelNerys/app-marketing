@@ -53,6 +53,7 @@ async def _publish_scheduled_post(schedule: PostSchedule) -> None:
             schedule.status = "published"
             schedule.published_at = datetime.now(timezone.utc)
             schedule.media_id_response = result.get("id")
+            schedule.error_message = None
             logger.info("Scheduled post %s published for account %s", schedule.id, schedule.account_id)
 
             # Ativa a automação de comentário deste post (se definida no agendamento)
@@ -63,6 +64,10 @@ async def _publish_scheduled_post(schedule: PostSchedule) -> None:
                     schedule.automation_keyword, schedule.automation_comment_reply,
                     schedule.automation_dm_message, schedule.automation_link_message,
                 )
+
+            # Já publicado: apaga a mídia do storage (o registro fica como "check").
+            from app.services import storage_service
+            await storage_service.delete_by_url(schedule.media_url)
 
         except TokenExpiredError as e:
             schedule.status = "failed"

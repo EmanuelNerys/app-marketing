@@ -50,6 +50,16 @@ const triggerLabel: Record<TriggerType, string> = {
   both: 'Comentário + DM/WhatsApp',
 }
 
+// Janela de agendamento: de agora até 15 dias à frente (formato datetime-local).
+const MAX_SCHEDULE_DAYS = 15
+const toLocalInput = (d: Date) => {
+  const off = d.getTimezoneOffset() * 60000
+  return new Date(d.getTime() - off).toISOString().slice(0, 16)
+}
+const minScheduleDate = () => toLocalInput(new Date())
+const maxScheduleDate = () =>
+  toLocalInput(new Date(Date.now() + MAX_SCHEDULE_DAYS * 86400000))
+
 export default function PublicarInstagram() {
   const [tab, setTab] = useState<Tab>('publish_auto')
   const [igUserId, setIgUserId] = useState('')
@@ -388,8 +398,9 @@ export default function PublicarInstagram() {
             </div>
 
             <div className="mb-4">
-              <label className="block text-[#666] text-xs font-medium mb-1">Agendar para (opcional)</label>
+              <label className="block text-[#666] text-xs font-medium mb-1">Agendar para (opcional · até {MAX_SCHEDULE_DAYS} dias)</label>
               <input type="datetime-local" value={scheduledFor} onChange={e => setScheduledFor(e.target.value)}
+                min={minScheduleDate()} max={maxScheduleDate()}
                 className="w-full bg-[#0a0a0f] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-[#e2e2e8]" />
             </div>
             <div className="flex gap-3">

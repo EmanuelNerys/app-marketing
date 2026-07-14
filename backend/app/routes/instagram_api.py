@@ -30,6 +30,7 @@ from app.services.instagram_service import (
     TokenExpiredError,
 )
 from app.services.meta_token_service import decrypt_token
+from app.services import storage_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/instagram", tags=["instagram-api"])
@@ -97,7 +98,9 @@ UPLOAD_DIR = Path("uploads")
 _IMAGE_EXT = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 _VIDEO_EXT = {"video/mp4": ".mp4", "video/quicktime": ".mov"}
 _MAX_IMAGE = 8 * 1024 * 1024
-_MAX_VIDEO = 100 * 1024 * 1024
+# Alinhado ao limite do bucket do Supabase (50 MB). Se aumentar o bucket,
+# aumente aqui também. 50 MB ≈ 1-2 min de vídeo 1080p.
+_MAX_VIDEO = 50 * 1024 * 1024
 
 
 @router.post("/upload-media")
@@ -121,12 +124,17 @@ async def upload_media_for_post(
     if len(content) > limit:
         raise HTTPException(413, f"Arquivo excede o limite de {limit // (1024 * 1024)} MB.")
 
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     # Nome imprevisível (uuid) — a URL é pública, então não deve ser adivinhável
     fname = f"{uuid.uuid4().hex}{ext}"
-    (UPLOAD_DIR / fname).write_bytes(content)
 
-    media_url = f"{settings.public_backend_url}/api/v1/instagram/uploads/{fname}"
+    # Preferência: Supabase Storage (persistente). Fallback: disco local (dev).
+    if settings.storage_enabled:
+        media_url = await storage_service.upload(fname, content, mime)
+    else:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        (UPLOAD_DIR / fname).write_bytes(content)
+        media_url = f"{settings.public_backend_url}/api/v1/instagram/uploads/{fname}"
+
     logger.info("Mídia de post enviada: %s (%s, %d bytes)", fname, media_type, len(content))
     return {"media_url": media_url, "media_type": media_type}
 
@@ -179,11 +187,18 @@ async def publish_media(
                 body.automation_dm_message, body.automation_link_message,
             )
 
+        # Já está no Instagram: apaga a mídia do storage para não acumular peso.
+        await storage_service.delete_by_url(body.media_url)
+
         return PublishMediaResponse(success=True, media_id=media_id, message="Publicado com sucesso!")
 
     except TokenExpiredError as e:
+        logger.warning("Publish token error (account %s): %s", current_user.tenant_id, e)
         raise HTTPException(status_code=401, detail=f"Token expirado: {e}. Reconecte o Instagram.")
     except ValueError as e:
+        # Erro de validação da Meta (ex.: aspect ratio inválido). Fica no log
+        # para diagnóstico e volta a mensagem exata da Meta para o usuário.
+        logger.warning("Publish rejeitado pela Meta (account %s): %s", current_user.tenant_id, e)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Publish failed: %s", e)
@@ -202,7 +217,20 @@ async def create_schedule(
 ):
     conn, token, ig_id = await _get_ig_connection(db, current_user, body.ig_user_id)
 
-    scheduled_for = body.scheduled_for or (datetime.now(timezone.utc) + timedelta(hours=1))
+    now = datetime.now(timezone.utc)
+    scheduled_for = body.scheduled_for or (now + timedelta(hours=1))
+    # Garante timezone-aware para comparar (datas vindas do front podem ser naive)
+    if scheduled_for.tzinfo is None:
+        scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+
+    if scheduled_for < now - timedelta(minutes=5):
+        raise HTTPException(422, "A data de agendamento não pode estar no passado.")
+    max_dt = now + timedelta(days=settings.max_schedule_days)
+    if scheduled_for > max_dt:
+        raise HTTPException(
+            422,
+            f"Só é possível agendar até {settings.max_schedule_days} dias à frente.",
+        )
 
     schedule = PostSchedule(
         account_id=current_user.tenant_id,
@@ -325,6 +353,7 @@ async def publish_scheduled_now(
         schedule.status = "published"
         schedule.published_at = datetime.now(timezone.utc)
         schedule.media_id_response = media_id
+        schedule.error_message = None
         await db.flush()
 
         # Ativa a automação de comentário deste post (se definida no agendamento)
@@ -336,18 +365,23 @@ async def publish_scheduled_now(
                 schedule.automation_dm_message, schedule.automation_link_message,
             )
 
+        # Já publicado: apaga a mídia do storage (o registro fica como "check").
+        await storage_service.delete_by_url(schedule.media_url)
+
         return PublishMediaResponse(success=True, media_id=media_id, message="Publicado com sucesso!")
 
     except TokenExpiredError as e:
         schedule.status = "failed"
         schedule.error_message = str(e)
         await db.flush()
+        logger.warning("Publish-now token error (schedule %s): %s", schedule.id, e)
         raise HTTPException(status_code=401, detail=f"Token expirado: {e}. Reconecte o Instagram.")
     except Exception as e:
         schedule.status = "failed"
         schedule.error_message = str(e)
         schedule.retry_count = (schedule.retry_count or 0) + 1
         await db.flush()
+        logger.warning("Publish-now falhou (schedule %s): %s", schedule.id, e)
         raise HTTPException(status_code=500, detail=f"Erro ao publicar: {e}")
 
 
