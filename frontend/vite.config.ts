@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     // Permite acessar o dev server por um domínio externo (ex: túnel ngrok)
     // sem o bloqueio "Blocked request. This host is not allowed" do Vite.
-    allowedHosts: ['ngoc-subumbellate-jayce.ngrok-free.dev'],
+    allowedHosts: ['ngoc-subumbellate-jayce.ngrok-free.dev', 'greedily-trunks-morally.ngrok-free.dev'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
