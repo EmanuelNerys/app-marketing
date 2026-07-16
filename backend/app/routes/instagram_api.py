@@ -439,6 +439,7 @@ async def get_insights(
 ):
     conn, token, ig_id = await _get_ig_connection(db, current_user, ig_user_id)
 
+    # 1) Dados do perfil (seguidores/posts) — precisa funcionar sempre.
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             user_resp = await client.get(
@@ -450,12 +451,22 @@ async def get_insights(
             )
             user_data = user_resp.json()
             logger.info("IG user data: %s", user_data)
+    except Exception as e:
+        logger.error("Failed to fetch IG profile: %s", e)
+        raise HTTPException(status_code=500, detail="Erro ao buscar dados do Instagram.")
 
+    # 2) Insights — best-effort. A API nova (Instagram Login) removeu métricas
+    # antigas (impressions, email_contacts, phone_call_clicks, get_direction_clicks);
+    # `views` substitui `impressions`. Se falhar (ex.: conta com poucos
+    # seguidores), zera as métricas em vez de derrubar a resposta inteira.
+    insights_data: dict = {}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             insights_resp = await client.get(
                 f"{settings.ig_graph_url}/{ig_id}/insights",
                 params={
                     "access_token": token,
-                    "metric": "reach,impressions,profile_views,website_clicks,email_contacts,phone_call_clicks,get_direction_clicks",
+                    "metric": "reach,views,profile_views,website_clicks",
                     "period": "day",
                     "since": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
                     "until": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -463,19 +474,18 @@ async def get_insights(
             )
             insights_data = insights_resp.json()
             logger.info("IG insights: %s", insights_data)
-
+            if insights_data.get("error"):
+                logger.warning("IG insights indisponível: %s", insights_data["error"])
     except Exception as e:
-        logger.error("Failed to fetch IG insights: %s", e)
-        raise HTTPException(status_code=500, detail="Erro ao buscar métricas do Instagram.")
+        logger.warning("Falha ao buscar insights IG (seguindo sem métricas): %s", e)
 
     followers = user_data.get("followers_count", 0) or 0
     follows = user_data.get("follows_count", 0) or 0
     media_count = user_data.get("media_count", 0) or 0
 
+    # `views` alimenta o campo "impressions" da resposta (equivalente novo).
     metrics = {
-        "reach": 0, "impressions": 0, "profile_views": 0,
-        "website_clicks": 0, "email_contacts": 0,
-        "phone_call_clicks": 0, "get_direction_clicks": 0,
+        "reach": 0, "views": 0, "profile_views": 0, "website_clicks": 0,
     }
 
     for item in insights_data.get("data", []):
@@ -494,12 +504,12 @@ async def get_insights(
         media_count=media_count,
         profile_views=metrics["profile_views"],
         reach=metrics["reach"],
-        impressions=metrics["impressions"],
+        impressions=metrics["views"],  # `views` é o substituto de `impressions`
         engagement=engagement,
         website_clicks=metrics["website_clicks"],
-        email_contacts=metrics["email_contacts"],
-        phone_call_clicks=metrics["phone_call_clicks"],
-        get_direction_clicks=metrics["get_direction_clicks"],
+        email_contacts=0,
+        phone_call_clicks=0,
+        get_direction_clicks=0,
         followers_delta=followers,
         profile_views_delta=metrics["profile_views"],
     )

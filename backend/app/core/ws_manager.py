@@ -18,7 +18,7 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
 
     async def connect(self, tenant_id: str, ws: WebSocket) -> None:
-        await ws.accept()
+        # O handshake (ws.accept) é feito pelo endpoint antes de validar o token.
         async with self._lock:
             self._connections[tenant_id].add(ws)
         logger.info("WS connected: tenant=%s total=%d", tenant_id, len(self._connections[tenant_id]))

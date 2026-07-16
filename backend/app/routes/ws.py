@@ -27,6 +27,10 @@ async def websocket_endpoint(
       - new_message           → nova mensagem na conversa
       - message_status_updated → status de mensagem (sent/delivered/read/failed)
     """
+    # Aceita o handshake primeiro; validar antes de aceitar pode gerar
+    # "got websocket.accept" se o cliente desconectar durante a checagem.
+    await ws.accept()
+
     async with async_session() as db:
         user = await get_current_user_ws(token, db)
 

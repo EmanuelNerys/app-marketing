@@ -103,12 +103,13 @@ async def instagram_callback(
 
     # Troca por long-lived token (~60 dias) via Instagram Graph
     from datetime import datetime, timezone, timedelta
+    # Endpoint de troca é SEM versão e SEM client_id (só client_secret + token).
+    # Usar "/v21.0/access_token" retorna "Unsupported request - method type: get".
     async with httpx.AsyncClient() as client:
         ll_resp = await client.get(
-            f"{IG_GRAPH_URL}/access_token",
+            "https://graph.instagram.com/access_token",
             params={
                 "grant_type": "ig_exchange_token",
-                "client_id": settings.ig_app_id or settings.meta_app_id,
                 "client_secret": settings.ig_app_secret or settings.meta_app_secret,
                 "access_token": short_lived_token,
             },
