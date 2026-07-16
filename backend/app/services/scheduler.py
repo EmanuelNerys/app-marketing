@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import select, and_
 
@@ -82,8 +82,55 @@ async def _publish_scheduled_post(schedule: PostSchedule) -> None:
         await db.commit()
 
 
+async def cleanup_orphan_media() -> None:
+    """Apaga do bucket arquivos que sobraram (upload sem publicar/agendar).
+
+    Mantém: arquivos ligados a agendamentos pendentes/falhos (ainda podem ser
+    publicados) e arquivos recentes (< 24h — podem estar prestes a virar post).
+    Só roda quando o Supabase Storage está ligado.
+    """
+    if not settings.storage_enabled:
+        return
+    from app.services import storage_service
+
+    files = await storage_service.list_objects()
+    if not files:
+        return
+
+    # Caminhos que NÃO podem ser apagados (agendamentos ainda vivos).
+    async with async_session() as db:
+        result = await db.execute(
+            select(PostSchedule.media_url).where(
+                PostSchedule.status.in_(["scheduled", "failed"])
+            )
+        )
+        referenced: set[str] = set()
+        for (url,) in result.all():
+            path = storage_service.path_from_url(url or "")
+            if path:
+                referenced.add(path)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    removed = 0
+    for obj in files:
+        name = obj["name"]
+        if name in referenced:
+            continue
+        try:
+            created = datetime.fromisoformat(obj["created_at"].replace("Z", "+00:00"))
+        except (ValueError, TypeError, KeyError):
+            continue
+        if created < cutoff:
+            await storage_service.delete(name)
+            removed += 1
+    if removed:
+        logger.info("Limpeza de órfãos: %d arquivo(s) removido(s) do bucket", removed)
+
+
 async def scheduler_loop():
     logger.info("Scheduler started (polling every %ds)", _POLL_INTERVAL)
+    _cleanup_every = 24 * 60 * 60  # 1x por dia
+    last_cleanup = 0.0
     while True:
         try:
             now = datetime.now(timezone.utc)
@@ -100,6 +147,15 @@ async def scheduler_loop():
 
             for post in due_posts:
                 await _publish_scheduled_post(post)
+
+            # Limpeza de órfãos no boot e depois 1x por dia.
+            loop_now = asyncio.get_event_loop().time()
+            if loop_now - last_cleanup >= _cleanup_every:
+                try:
+                    await cleanup_orphan_media()
+                except Exception as e:
+                    logger.error("Orphan cleanup error: %s", e)
+                last_cleanup = loop_now
 
         except Exception as e:
             logger.error("Scheduler error: %s", e)

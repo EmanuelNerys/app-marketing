@@ -86,3 +86,27 @@ async def delete_by_url(url: str) -> None:
     path = path_from_url(url)
     if path:
         await delete(path)
+
+
+async def list_objects(prefix: str = "", limit: int = 1000) -> list[dict]:
+    """Lista objetos do bucket (cada item tem 'name' e 'created_at').
+
+    Best-effort: retorna [] em caso de erro (a limpeza não deve derrubar nada).
+    """
+    url = f"{_base()}/object/list/{settings.supabase_bucket}"
+    body = {
+        "prefix": prefix,
+        "limit": limit,
+        "sortBy": {"column": "created_at", "order": "asc"},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, headers={**_headers(), "Content-Type": "application/json"}, json=body)
+        if resp.status_code != 200:
+            logger.warning("Falha ao listar bucket (%s): %s", resp.status_code, resp.text)
+            return []
+        # A API às vezes retorna um placeholder de pasta sem created_at — filtra.
+        return [o for o in resp.json() if o.get("name") and o.get("created_at")]
+    except Exception as e:
+        logger.warning("Erro ao listar bucket: %s", e)
+        return []
