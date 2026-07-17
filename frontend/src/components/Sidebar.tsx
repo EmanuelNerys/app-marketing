@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Clapperboard, Megaphone, Link2, Send,
   Users, Settings, CreditCard, Building2, LogOut,
   ChevronRight, ChevronDown, MessageSquare, FileText, Clock,
-  Headphones, Camera, Zap,
+  Headphones, Camera, Zap, Shield,
   type LucideIcon,
 } from 'lucide-react'
 import api from '../services/api'
@@ -37,10 +37,16 @@ export default function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
   const [planType, setPlanType] = useState<string | null>(null)
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [waNumber, setWaNumber] = useState<string | null>(null)
   const [blockedModules, setBlockedModules] = useState<string[]>([])
+  // Módulos efetivos deste usuário (conta - bloqueados ∩ permitidos do usuário).
+  const [modules, setModules] = useState<string[] | null>(null)
 
-  const blocked = (m: string) => blockedModules.includes(m)
+  // Um módulo "some" do menu se não estiver nos módulos efetivos do usuário.
+  // Fallback para blocked_modules quando o backend antigo não mandar `modules`.
+  const blocked = (m: string) =>
+    modules !== null ? !modules.includes(m) : blockedModules.includes(m)
 
   // Módulos bloqueados pela agência-mãe/super admin somem do menu
   // (o backend também bloqueia as rotas com 403).
@@ -94,6 +100,8 @@ export default function Sidebar() {
     api.get('/auth/me').then(({ data }) => {
       if (data?.plan_type) setPlanType(data.plan_type)
       if (Array.isArray(data?.blocked_modules)) setBlockedModules(data.blocked_modules)
+      if (Array.isArray(data?.modules)) setModules(data.modules)
+      setIsSuperAdmin(!!data?.is_super_admin)
     }).catch(() => {})
 
     // Número do WhatsApp conectado (via Meta) — mostrado sob o item WhatsApp
@@ -215,6 +223,23 @@ export default function Sidebar() {
             >
               <Building2 size={15} strokeWidth={1.75} />
               <span className="flex-1">Clientes</span>
+              <ChevronRight size={12} className="opacity-40" />
+            </NavLink>
+          </>
+        )}
+
+        {isSuperAdmin && (
+          <>
+            <div className="h-px bg-white/[0.05] my-3 mx-2" />
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#3a3a4a] px-2 mb-2">
+              Sistema
+            </p>
+            <NavLink
+              to="/app/super-admin"
+              className={({ isActive }) => navItemClass(isActive)}
+            >
+              <Shield size={15} strokeWidth={1.75} />
+              <span className="flex-1">Super Admin</span>
               <ChevronRight size={12} className="opacity-40" />
             </NavLink>
           </>

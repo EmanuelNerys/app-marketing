@@ -62,6 +62,10 @@ class UserOut(BaseModel):
     brand_name: str | None = None
     # Módulos bloqueados pela agência-mãe/super admin (o frontend esconde)
     blocked_modules: list[str] = Field(default_factory=list)
+    # Módulos que ESTE usuário realmente acessa (conta - bloqueados ∩ permitidos)
+    modules: list[str] = Field(default_factory=list)
+    # Lista escolhida pelo admin p/ este usuário (None = herda todos da conta)
+    allowed_modules: list[str] | None = None
     # Super admin do sistema (SUPER_ADMIN_EMAILS)
     is_super_admin: bool = False
 
@@ -203,7 +207,8 @@ async def me(
 ):
     result = await db.execute(select(Account).where(Account.id == current_user.tenant_id))
     account = result.scalar_one_or_none()
-    from app.core.modules import is_super_admin
+    from app.core.modules import is_super_admin, effective_modules_for
+    modules = await effective_modules_for(db, current_user)
     return UserOut(
         id=current_user.id,
         tenant_id=current_user.tenant_id,
@@ -214,6 +219,8 @@ async def me(
         plan_type=account.plan_type if account else None,
         brand_name=account.brand_name if account else None,
         blocked_modules=list(account.blocked_modules or []) if account else [],
+        modules=modules,
+        allowed_modules=current_user.allowed_modules,
         is_super_admin=is_super_admin(current_user),
     )
 
@@ -261,6 +268,14 @@ class CreateAgentRequest(BaseModel):
     password: str = Field(..., min_length=6)
     full_name: str | None = None
     role: str = "agent"
+    # Módulos permitidos p/ este usuário (None = todos os da conta). Só p/ agent.
+    allowed_modules: list[str] | None = None
+    # Empresas-filhas que este membro da agência pode ver (ClientAssignment).
+    client_ids: list[str] = Field(default_factory=list)
+
+
+class UpdateUserModulesRequest(BaseModel):
+    allowed_modules: list[str] | None = None  # None = herda todos da conta
 
 
 @router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -279,6 +294,12 @@ async def create_agent(
     if body.role not in ("admin", "agent"):
         raise HTTPException(status_code=400, detail="Role inválida. Use 'admin' ou 'agent'.")
 
+    # Módulos por usuário só valem para agentes; admin sempre vê tudo da conta.
+    allowed_modules = None
+    if body.role == "agent" and body.allowed_modules is not None:
+        from app.core.modules import AVAILABLE_MODULES
+        allowed_modules = [m for m in body.allowed_modules if m in AVAILABLE_MODULES]
+
     user = User(
         id=str(uuid.uuid4()),
         tenant_id=current_user.tenant_id,
@@ -286,9 +307,24 @@ async def create_agent(
         password_hash=hash_password(body.password),
         full_name=body.full_name,
         role=body.role,
+        allowed_modules=allowed_modules,
     )
     db.add(user)
     await db.flush()
+
+    # Vínculo com empresas-filhas (só faz sentido para agência).
+    if body.client_ids:
+        from app.models.client_assignment import ClientAssignment
+        # Garante que os client_ids são empresas-filhas desta agência.
+        valid = await db.execute(
+            select(Account.id).where(
+                Account.id.in_(body.client_ids),
+                Account.parent_account_id == current_user.tenant_id,
+            )
+        )
+        for cid in [r[0] for r in valid.all()]:
+            db.add(ClientAssignment(user_id=user.id, client_account_id=cid))
+        await db.flush()
 
     return UserOut(
         id=user.id,
@@ -297,6 +333,41 @@ async def create_agent(
         full_name=user.full_name,
         role=user.role,
         is_active=user.is_active,
+        allowed_modules=user.allowed_modules,
+    )
+
+
+@router.put("/users/{user_id}/modules", response_model=UserOut)
+async def update_user_modules(
+    user_id: str,
+    body: UpdateUserModulesRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin da conta define quais módulos um agente pode acessar."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Apenas admins podem alterar módulos.")
+
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.tenant_id == current_user.tenant_id)
+    )
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    if target.role == "admin":
+        raise HTTPException(status_code=400, detail="Admin já tem acesso a todos os módulos.")
+
+    if body.allowed_modules is None:
+        target.allowed_modules = None
+    else:
+        from app.core.modules import AVAILABLE_MODULES
+        target.allowed_modules = [m for m in body.allowed_modules if m in AVAILABLE_MODULES]
+    await db.flush()
+
+    return UserOut(
+        id=target.id, tenant_id=target.tenant_id, username=target.username,
+        full_name=target.full_name, role=target.role, is_active=target.is_active,
+        allowed_modules=target.allowed_modules,
     )
 
 
@@ -314,6 +385,7 @@ async def list_users(
         UserOut(
             id=u.id, tenant_id=u.tenant_id, username=u.username,
             full_name=u.full_name, role=u.role, is_active=u.is_active,
+            allowed_modules=u.allowed_modules,
         )
         for u in users
     ]

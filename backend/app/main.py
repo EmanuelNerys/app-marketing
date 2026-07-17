@@ -12,6 +12,7 @@ from app.core.database import engine, Base
 from app.routes import auth, webhook, dashboard, leads, accounts, automations, privacy, instagram, instagram_api
 from app.routes import auth_jwt, conversations, messages, ws, whatsapp, payments, tenants, clients
 from app.routes import auth_email
+from app.routes import admin as admin_routes
 from app.routes import marketing
 from app.routes import studio
 from app.routes import ai as ai_routes
@@ -141,6 +142,7 @@ app.include_router(privacy.router, prefix="/api/v1")
 
 # JWT auth + multi-tenant chat
 app.include_router(auth_jwt.router, prefix="/api/v1")
+app.include_router(admin_routes.router, prefix="/api/v1")
 app.include_router(conversations.router, prefix="/api/v1")
 app.include_router(messages.router, prefix="/api/v1")
 app.include_router(whatsapp.router, prefix="/api/v1",

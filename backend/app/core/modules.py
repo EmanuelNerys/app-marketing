@@ -46,19 +46,42 @@ async def get_blocked_modules(db: AsyncSession, account_id: str) -> list[str]:
     return list(account or [])
 
 
+async def effective_modules_for(db: AsyncSession, user: User) -> list[str]:
+    """Módulos que ESTE usuário realmente acessa.
+
+    Hierarquia:
+      1. Parte de todos os módulos do sistema.
+      2. Tira os bloqueados na conta (definidos pela agência-mãe/super admin).
+      3. Se o usuário NÃO é admin e tem `allowed_modules` definido, restringe a
+         essa lista (o admin da conta escolhe por usuário). Admin vê tudo que
+         a conta tem liberado.
+    """
+    blocked = set(await get_blocked_modules(db, user.tenant_id))
+    account_modules = [m for m in AVAILABLE_MODULES if m not in blocked]
+
+    if user.role != "admin" and user.allowed_modules is not None:
+        allowed = set(user.allowed_modules)
+        return [m for m in account_modules if m in allowed]
+    return account_modules
+
+
 def require_module(module: str):
-    """Dependência de router: 403 se o módulo estiver bloqueado para o tenant."""
+    """Dependência de router: 403 se o módulo não estiver disponível para o usuário.
+
+    Considera tanto o bloqueio na conta (agência/super admin) quanto a lista de
+    módulos permitidos do próprio usuário (definida pelo admin da conta).
+    """
 
     async def _guard(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ) -> None:
-        blocked = await get_blocked_modules(db, current_user.tenant_id)
-        if module in blocked:
+        allowed = await effective_modules_for(db, current_user)
+        if module not in allowed:
             raise HTTPException(
                 status_code=403,
-                detail=f"O módulo '{AVAILABLE_MODULES.get(module, module)}' está desativado "
-                       "para esta conta. Fale com a sua agência.",
+                detail=f"O módulo '{AVAILABLE_MODULES.get(module, module)}' não está "
+                       "disponível para o seu usuário. Fale com o administrador.",
             )
 
     return _guard

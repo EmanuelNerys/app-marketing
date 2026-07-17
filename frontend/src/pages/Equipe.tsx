@@ -8,12 +8,21 @@ interface Member {
   full_name: string | null
   role: string
   is_active: boolean
+  allowed_modules: string[] | null
 }
 
 interface ClientLite {
   id: string
   brand_name: string
 }
+
+// Módulos que o admin pode liberar por usuário (bate com AVAILABLE_MODULES do backend)
+const MODULES: { key: string; label: string }[] = [
+  { key: 'whatsapp', label: 'WhatsApp' },
+  { key: 'instagram', label: 'Instagram' },
+  { key: 'ads', label: 'Meta Ads' },
+  { key: 'ia', label: 'IA de atendimento' },
+]
 
 export default function Equipe() {
   const myId = localStorage.getItem('user_id') || ''
@@ -30,12 +39,29 @@ export default function Equipe() {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
 
+  // Módulos na criação (para agente): null = todos; senão lista escolhida
+  const [createModules, setCreateModules] = useState<Set<string>>(new Set())
+  const [createAllModules, setCreateAllModules] = useState(true)
+  const [createClientIds, setCreateClientIds] = useState<Set<string>>(new Set())
+
+  // Editar módulos de um membro existente
+  const [modulesMember, setModulesMember] = useState<Member | null>(null)
+  const [moduleDraft, setModuleDraft] = useState<Set<string>>(new Set())
+  const [moduleAll, setModuleAll] = useState(true)
+  const [savingModules, setSavingModules] = useState(false)
+
+  // Módulos que a conta tem liberado (o resto a agência/super admin bloqueou)
+  const [accountBlocked, setAccountBlocked] = useState<string[]>([])
+
   // Atribuição de empresas (agência)
   const [isAgency, setIsAgency] = useState(false)
   const [clients, setClients] = useState<ClientLite[]>([])
   const [assignMember, setAssignMember] = useState<Member | null>(null)
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set())
   const [savingAssign, setSavingAssign] = useState(false)
+
+  // Módulos oferecíveis = catálogo menos os bloqueados na conta
+  const availableModules = MODULES.filter((m) => !accountBlocked.includes(m.key))
 
   useEffect(() => { load() }, [])
 
@@ -46,6 +72,7 @@ export default function Equipe() {
       setMembers(data)
       try {
         const me = (await api.get('/auth/me')).data
+        setAccountBlocked(me.blocked_modules || [])
         if (me.plan_type === 'agencia') {
           setIsAgency(true)
           const list = (await api.get('/auth/clients')).data
@@ -92,6 +119,27 @@ export default function Equipe() {
     }
   }
 
+  function openCreate() {
+    setUsername(''); setPassword(''); setFullName(''); setRole('agent')
+    setCreateModules(new Set()); setCreateAllModules(true); setCreateClientIds(new Set())
+    setCreateError(''); setShowCreate(true)
+  }
+
+  function toggleCreateModule(key: string) {
+    setCreateModules((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+  function toggleCreateClient(id: string) {
+    setCreateClientIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
   async function handleCreate(e: React.SyntheticEvent) {
     e.preventDefault()
     setCreateError('')
@@ -106,14 +154,45 @@ export default function Equipe() {
         password,
         full_name: fullName.trim() || null,
         role,
+        // Só manda módulos para agente e quando NÃO for "todos"
+        allowed_modules: role === 'agent' && !createAllModules ? [...createModules] : null,
+        client_ids: isAgency && role === 'agent' ? [...createClientIds] : [],
       })
       setShowCreate(false)
-      setUsername(''); setPassword(''); setFullName(''); setRole('agent')
       await load()
     } catch (err: any) {
       setCreateError(err.response?.data?.detail || 'Erro ao criar membro.')
     } finally {
       setCreating(false)
+    }
+  }
+
+  // ---- Editar módulos de um membro existente ----
+  function openModules(m: Member) {
+    setModulesMember(m)
+    setModuleAll(m.allowed_modules === null)
+    setModuleDraft(new Set(m.allowed_modules || []))
+  }
+  function toggleModuleDraft(key: string) {
+    setModuleDraft((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+  async function saveMemberModules() {
+    if (!modulesMember) return
+    setSavingModules(true)
+    try {
+      await api.put(`/auth/users/${modulesMember.id}/modules`, {
+        allowed_modules: moduleAll ? null : [...moduleDraft],
+      })
+      setModulesMember(null)
+      await load()
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Erro ao salvar módulos.')
+    } finally {
+      setSavingModules(false)
     }
   }
 
@@ -140,7 +219,7 @@ export default function Equipe() {
           <p className="text-[#555] text-sm mt-0.5">Gerencie os usuários que acessam esta conta.</p>
         </div>
         <button
-          onClick={() => { setShowCreate(true); setCreateError('') }}
+          onClick={openCreate}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
         >
           <Plus size={15} />
@@ -173,8 +252,26 @@ export default function Equipe() {
                   {m.id === myId && <span className="text-[10px] text-[#555]">(você)</span>}
                 </div>
                 <p className="text-[11px] text-[#555] mt-0.5">@{m.username}</p>
+                {m.role !== 'admin' && (
+                  <p className="text-[10px] text-[#555] mt-1">
+                    Módulos: {m.allowed_modules === null
+                      ? 'todos da conta'
+                      : (m.allowed_modules.length
+                          ? m.allowed_modules.map((k) => MODULES.find((x) => x.key === k)?.label || k).join(', ')
+                          : 'nenhum')}
+                  </p>
+                )}
               </div>
               <div className="flex gap-2 shrink-0">
+                {m.role !== 'admin' && (
+                  <button
+                    onClick={() => openModules(m)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.04] border border-white/[0.1] text-[#c0c0d0] rounded-lg text-xs font-semibold hover:bg-white/[0.08] transition-colors"
+                  >
+                    <Shield size={12} />
+                    Módulos
+                  </button>
+                )}
                 {isAgency && m.role !== 'admin' && (
                   <button
                     onClick={() => openAssign(m)}
@@ -251,6 +348,46 @@ export default function Equipe() {
                 </div>
               </div>
 
+              {role === 'agent' && (
+                <div>
+                  <label className="block text-xs font-medium text-[#666] mb-1.5">Módulos que este agente acessa</label>
+                  <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.08] bg-[#0a0a0f] cursor-pointer mb-1.5">
+                    <input type="checkbox" checked={createAllModules} onChange={() => setCreateAllModules(!createAllModules)} className="accent-indigo-600" />
+                    <span className="text-sm text-[#c0c0d0]">Todos os módulos da conta</span>
+                  </label>
+                  {!createAllModules && (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {availableModules.map((m) => {
+                        const on = createModules.has(m.key)
+                        return (
+                          <label key={m.key} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${on ? 'bg-indigo-600/10 border-indigo-500/40' : 'bg-[#0a0a0f] border-white/[0.06] hover:border-white/[0.14]'}`}>
+                            <input type="checkbox" checked={on} onChange={() => toggleCreateModule(m.key)} className="accent-indigo-600" />
+                            <span className={`text-xs ${on ? 'text-[#e2e2e8]' : 'text-[#8a8a9e]'}`}>{m.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isAgency && role === 'agent' && clients.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-[#666] mb-1.5">Empresas que este membro vê (opcional)</label>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto">
+                    {clients.map((c) => {
+                      const on = createClientIds.has(c.id)
+                      return (
+                        <label key={c.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${on ? 'bg-indigo-600/10 border-indigo-500/40' : 'bg-[#0a0a0f] border-white/[0.06] hover:border-white/[0.14]'}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggleCreateClient(c.id)} className="accent-indigo-600" />
+                          <span className={`text-xs truncate ${on ? 'text-[#e2e2e8]' : 'text-[#8a8a9e]'}`}>{c.brand_name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-1">
                 <button type="button" onClick={() => setShowCreate(false)} className="flex-1 py-2.5 border border-white/[0.08] text-[#666] hover:text-white text-sm font-medium rounded-lg transition-colors">Cancelar</button>
                 <button type="submit" disabled={creating} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
@@ -315,6 +452,45 @@ export default function Equipe() {
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
               >
                 {savingAssign ? 'Salvando…' : `Salvar (${assignedIds.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: módulos que o membro pode acessar */}
+      {modulesMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-semibold text-white">Módulos de {modulesMember.full_name || modulesMember.username}</h3>
+              <button onClick={() => setModulesMember(null)} className="text-[#444] hover:text-[#888]"><X size={18} /></button>
+            </div>
+            <p className="text-xs text-[#555] mb-4">Escolha o que este agente pode acessar. (Módulos bloqueados pela agência não aparecem.)</p>
+
+            <label className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-white/[0.08] bg-[#0a0a0f] cursor-pointer mb-2">
+              <input type="checkbox" checked={moduleAll} onChange={() => setModuleAll(!moduleAll)} className="accent-indigo-600" />
+              <span className="text-sm text-[#c0c0d0]">Todos os módulos da conta</span>
+            </label>
+
+            {!moduleAll && (
+              <div className="space-y-1.5 mb-5">
+                {availableModules.map((m) => {
+                  const on = moduleDraft.has(m.key)
+                  return (
+                    <label key={m.key} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors ${on ? 'bg-indigo-600/10 border-indigo-500/40' : 'bg-[#0a0a0f] border-white/[0.06] hover:border-white/[0.14]'}`}>
+                      <input type="checkbox" checked={on} onChange={() => toggleModuleDraft(m.key)} className="accent-indigo-600" />
+                      <span className={`text-sm ${on ? 'text-[#e2e2e8]' : 'text-[#8a8a9e]'}`}>{m.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setModulesMember(null)} className="flex-1 py-2.5 border border-white/[0.08] text-[#666] hover:text-white text-sm font-medium rounded-lg transition-colors">Cancelar</button>
+              <button onClick={saveMemberModules} disabled={savingModules} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+                {savingModules ? 'Salvando…' : 'Salvar'}
               </button>
             </div>
           </div>

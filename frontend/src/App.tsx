@@ -19,6 +19,7 @@ import WhatsApp from './pages/WhatsApp'
 import InstagramInbox from './pages/InstagramInbox'
 import Templates from './pages/Templates'
 import Equipe from './pages/Equipe'
+import SuperAdmin from './pages/SuperAdmin'
 import FollowUps from './pages/FollowUps'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/app/leads" element={<Leads />} />
           <Route path="/app/configuracoes" element={<Configuracoes />} />
           <Route path="/app/clientes" element={<Clients />} />
+          <Route path="/app/super-admin" element={<SuperAdmin />} />
           <Route path="/app/marketing" element={<Marketing />} />
           <Route path="/app/marketing/:campaignId" element={<MarketingCampaignDetail />} />
         </Route>
