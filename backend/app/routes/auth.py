@@ -44,12 +44,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 #   TODO: replace PROVIDER_WHATSAPP flow with Embedded Signup after Tech Provider approval.
 # ---------------------------------------------------------------------------
 
+# Instagram NÃO usa este dicionário: ele tem endpoint e fluxo próprios em
+# /auth/instagram/start (Instagram Login, instagram.com/oauth/authorize —
+# ver app/routes/instagram.py). Uma entrada "instagram" aqui existiu no
+# passado com scopes do Facebook Login antigo e nunca era alcançada pelo
+# frontend, mas confundia a revisão do app da Meta (dois fluxos de OAuth
+# distintos com o mesmo nome de provider). Removida de propósito — ver
+# checagem explícita em meta_start() abaixo.
 _PROVIDER_SCOPES: dict[str, str] = {
-    PROVIDER_INSTAGRAM: (
-        "pages_show_list,"
-        "pages_read_engagement,"
-        "instagram_manage_comments"
-    ),
     PROVIDER_WHATSAPP: (
         "whatsapp_business_messaging,"
         "whatsapp_business_management,"
@@ -100,6 +102,11 @@ async def meta_start(
     """Generate a provider-specific OAuth URL with a signed anti-CSRF state."""
     if provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Provider must be one of: {', '.join(PROVIDERS)}")
+    if provider == PROVIDER_INSTAGRAM:
+        raise HTTPException(
+            status_code=400,
+            detail="Instagram usa o Instagram Login — chame GET /auth/instagram/start.",
+        )
 
     state = create_signed_state(account_id, provider)
     params = {

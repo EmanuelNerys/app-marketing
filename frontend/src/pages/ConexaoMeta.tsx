@@ -60,24 +60,29 @@ function connectionDetail(conn: Connection): string | null {
   }
 }
 
-const PROVIDERS: { key: Provider; label: string; icon: string; description: string }[] = [
+const PROVIDERS: { key: Provider; label: string; icon: string; description: string; authBadge?: string }[] = [
   {
     key: 'instagram',
     label: 'Instagram',
     icon: '📸',
     description: 'DMs, comentários, publicação de posts e mídias.',
+    authBadge: 'via Login do Instagram',
   },
   {
     key: 'whatsapp',
     label: 'WhatsApp Business',
     icon: '💬',
     description: 'Envio de mensagens e templates via WhatsApp Business.',
+    // Rótulo explícito exigido pela revisão de apps da Meta: o botão de
+    // Login do Facebook precisa ser identificável por quem não conhece o produto.
+    authBadge: 'via Login do Facebook',
   },
   {
     key: 'ads',
     label: 'Meta Ads',
     icon: '📊',
     description: 'Gerenciamento e análise de campanhas de anúncios.',
+    authBadge: 'via Login do Facebook',
   },
 ]
 
@@ -406,7 +411,7 @@ export default function ConexaoMeta() {
         <div className="text-[#555] text-sm">Carregando conexões...</div>
       ) : (
         <div className="grid gap-4 max-w-2xl">
-          {PROVIDERS.map(({ key, label, icon, description }) => {
+          {PROVIDERS.map(({ key, label, icon, description, authBadge }) => {
             const conn = getConnection(key)
             const isConnected = conn?.status === 'active'
             const needsAction = conn && conn.status !== 'active'
@@ -430,6 +435,9 @@ export default function ConexaoMeta() {
                     )}
                   </div>
                   <p className="text-[#555] text-xs mt-0.5">{description}</p>
+                  {authBadge && (
+                    <p className="text-indigo-400/70 text-[11px] mt-1 font-medium">{authBadge}</p>
+                  )}
                   {conn && isConnected && connectionDetail(conn) && (
                     <p className="text-emerald-400/80 text-xs mt-1 truncate">{connectionDetail(conn)}</p>
                   )}
