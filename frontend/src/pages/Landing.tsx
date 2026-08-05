@@ -1,8 +1,9 @@
+import { useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion, type Variants } from 'motion/react'
+import { motion, useMotionValue, useSpring, useScroll, useTransform, type Variants } from 'motion/react'
 import {
   Camera, MessageSquare, Megaphone, Clock,
-  Building2, Users, Check, ArrowRight, Sparkles, Flame,
+  Building2, Users, Check, ArrowRight, Sparkles, Flame, ChevronDown,
 } from 'lucide-react'
 
 /** Destaque sólido (sem gradiente) com uma barra "marca-texto" atrás — no
@@ -12,6 +13,77 @@ function Highlight({ children }: { children: React.ReactNode }) {
     <span className="relative inline-block whitespace-nowrap">
       <span className="absolute inset-x-0 bottom-0.5 h-[0.32em] bg-indigo-500/25 rounded-sm -z-10" />
       {children}
+    </span>
+  )
+}
+
+/** Glow que segue o cursor dentro do card — troca o hover genérico
+ * (lift + shadow, o clichê de todo template) por algo que só existe
+ * porque alguém desenhou pensando no mouse do usuário. */
+function SpotlightCard({ children, className }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  function onMove(e: React.MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    ref.current?.style.setProperty('--x', `${e.clientX - rect.left}px`)
+    ref.current?.style.setProperty('--y', `${e.clientY - rect.top}px`)
+  }
+  return (
+    <div ref={ref} onMouseMove={onMove} className={`group relative ${className ?? ''}`}>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-[inherit] z-0"
+        style={{ background: 'radial-gradient(420px circle at var(--x, 50%) var(--y, 50%), rgba(129,140,248,0.14), transparent 65%)' }}
+      />
+      <div className="relative z-[1]">{children}</div>
+    </div>
+  )
+}
+
+/** Botão que "gruda" levemente no cursor — micro-interação que nenhum
+ * gerador de landing produz por padrão. */
+function MagneticButton({
+  children, className, onClick,
+}: { children: React.ReactNode; className?: string; onClick?: () => void }) {
+  const x = useMotionValue(0)
+  const y = useMotionValue(0)
+  const springX = useSpring(x, { stiffness: 300, damping: 20, mass: 0.5 })
+  const springY = useSpring(y, { stiffness: 300, damping: 20, mass: 0.5 })
+  function onMove(e: React.MouseEvent<HTMLButtonElement>) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    x.set((e.clientX - rect.left - rect.width / 2) * 0.25)
+    y.set((e.clientY - rect.top - rect.height / 2) * 0.25)
+  }
+  function onLeave() {
+    x.set(0)
+    y.set(0)
+  }
+  return (
+    <motion.button
+      onClick={onClick}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+      style={{ x: springX, y: springY }}
+      whileTap={{ scale: 0.96 }}
+      className={className}
+    >
+      {children}
+    </motion.button>
+  )
+}
+
+/** Três pontinhos animados — indica "alguém está digitando" no mockup do
+ * inbox, pra ele parecer vivo em loop, não só uma foto estática. */
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="w-1 h-1 rounded-full bg-[#6b6b7d]"
+          animate={{ y: [0, -3, 0] }}
+          transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.15, ease: 'easeInOut' }}
+        />
+      ))}
     </span>
   )
 }
@@ -42,6 +114,9 @@ function Reveal({ children, className }: { children: React.ReactNode; className?
 
 export default function Landing() {
   const navigate = useNavigate()
+  const { scrollYProgress } = useScroll()
+  const blobY1 = useTransform(scrollYProgress, [0, 1], [0, -160])
+  const blobY2 = useTransform(scrollYProgress, [0, 1], [0, 120])
 
   const integrations = [
     {
@@ -95,6 +170,9 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen bg-[#07070c] text-[#f4f2fb] antialiased selection:bg-indigo-500/30">
+      {/* grain sutil sobre tudo — quebra o "fundo escuro liso" que é o tell nº1 de IA */}
+      <div className="grain-overlay pointer-events-none fixed inset-0 z-[41]" aria-hidden="true" />
+
       {/* glow ambiente — um único tom (indigo/violeta), nada de arco-íris */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 left-[10%] w-[820px] h-[480px] rounded-full bg-indigo-600/10 blur-[130px]" />
@@ -112,10 +190,10 @@ export default function Landing() {
             <button onClick={() => navigate('/login')} className="px-4 py-2 text-sm text-[#8a8a9e] hover:text-white transition-colors">
               Entrar
             </button>
-            <button onClick={() => navigate('/login')}
+            <MagneticButton onClick={() => navigate('/login')}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors">
               Criar conta
-            </button>
+            </MagneticButton>
           </div>
         </div>
       </nav>
@@ -123,8 +201,12 @@ export default function Landing() {
       {/* hero — assimétrico: texto + mockup real do produto (não só texto centralizado) */}
       <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-          <div className="aurora-blob aurora-a absolute -top-32 left-[4%] w-[520px] h-[420px] bg-indigo-600/20" />
-          <div className="aurora-blob aurora-b absolute -top-16 right-[2%] w-[480px] h-[400px] bg-violet-500/10" />
+          <motion.div style={{ y: blobY1 }} className="absolute -top-32 left-[4%] w-[520px] h-[420px]">
+            <div className="aurora-blob aurora-a w-full h-full bg-indigo-600/20" />
+          </motion.div>
+          <motion.div style={{ y: blobY2 }} className="absolute -top-16 right-[2%] w-[480px] h-[400px]">
+            <div className="aurora-blob aurora-b w-full h-full bg-violet-500/10" />
+          </motion.div>
           <div className="hero-grid absolute inset-0" />
           <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-b from-transparent to-[#07070c]" />
         </div>
@@ -135,19 +217,25 @@ export default function Landing() {
               <Sparkles size={13} className="text-indigo-400" />
               Instagram · WhatsApp · Meta Ads em um só painel
             </motion.div>
-            <motion.h1 variants={fadeUp} className="text-4xl md:text-[3.4rem] font-extrabold leading-[1.08] tracking-tight text-balance mb-6">
-              Todo o seu marketing digital <Highlight>num sistema só</Highlight>
-            </motion.h1>
+            <motion.div
+              initial={{ clipPath: 'inset(0 100% 0 0)' }}
+              animate={{ clipPath: 'inset(0 0% 0 0)' }}
+              transition={{ duration: 0.9, ease: [0.65, 0, 0.35, 1], delay: 0.15 }}
+            >
+              <h1 className="text-4xl md:text-[3.4rem] font-extrabold leading-[1.08] tracking-tight text-balance mb-6">
+                Todo o seu marketing digital <Highlight>num sistema só</Highlight>
+              </h1>
+            </motion.div>
             <motion.p variants={fadeUp} className="text-lg text-[#8a8a9e] max-w-xl mb-10">
               Conecte suas redes, atenda e dispare mensagens, rode anúncios e deixe a IA qualificar seus leads —
               para autônomos e para agências que gerenciam vários clientes.
             </motion.p>
             <motion.div variants={fadeUp} className="flex flex-wrap items-center gap-3">
-              <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.98 }} onClick={() => navigate('/login')}
+              <MagneticButton onClick={() => navigate('/login')}
                 className="group px-6 py-3 rounded-xl font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors flex items-center gap-2">
                 Criar conta grátis
                 <ArrowRight size={17} className="group-hover:translate-x-0.5 transition-transform" />
-              </motion.button>
+              </MagneticButton>
               <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.98 }} onClick={() => navigate('/login')}
                 className="px-6 py-3 rounded-xl font-semibold border border-white/[0.12] text-[#f4f2fb] hover:border-indigo-400/60 transition-colors">
                 Já tenho conta
@@ -205,6 +293,14 @@ export default function Landing() {
                       <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 rounded-full px-2 py-0.5 shrink-0">{lead.score}</span>
                     </motion.div>
                   ))}
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 1.1, duration: 0.4 }}
+                    className="flex items-center gap-2 px-2.5 pt-1 text-[11px] text-[#5c5f70]"
+                  >
+                    <TypingDots /> digitando…
+                  </motion.div>
                 </div>
               </div>
             </motion.div>
@@ -220,6 +316,14 @@ export default function Landing() {
             </motion.div>
           </motion.div>
         </div>
+
+        <motion.div
+          animate={{ y: [0, 6, 0] }}
+          transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+          className="hidden md:flex justify-center pb-6 text-[#4a4a5a]"
+        >
+          <ChevronDown size={20} />
+        </motion.div>
       </section>
 
       {/* integrações */}
@@ -232,24 +336,25 @@ export default function Landing() {
           {integrations.map((it) => {
             const Icon = it.icon
             return (
-              <motion.div key={it.name} variants={fadeUp}
-                className="relative rounded-xl bg-[#111118] border border-white/[0.07] hover:border-white/[0.14] transition-colors p-6 overflow-hidden">
-                <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: it.accent }} />
-                <div className="flex items-center gap-3 mb-4">
-                  <span className="w-9 h-9 shrink-0 rounded-lg grid place-items-center"
-                    style={{ background: `${it.accent}1f`, border: `1px solid ${it.accent}47` }}>
-                    <Icon size={17} style={{ color: it.accent }} />
-                  </span>
-                  <h3 className="text-base font-bold">{it.name}</h3>
-                </div>
-                <p className="text-sm text-[#8a8a9e] leading-relaxed mb-4">{it.desc}</p>
-                <ul className="space-y-2">
-                  {it.points.map((p) => (
-                    <li key={p} className="flex items-center gap-2 text-sm text-[#c9c9d6]">
-                      <Check size={14} style={{ color: it.accent }} className="shrink-0" /> {p}
-                    </li>
-                  ))}
-                </ul>
+              <motion.div key={it.name} variants={fadeUp}>
+                <SpotlightCard className="rounded-xl bg-[#111118] border border-white/[0.07] hover:border-white/[0.14] transition-colors p-6 overflow-hidden">
+                  <span className="absolute left-0 top-0 bottom-0 w-[3px] z-[1]" style={{ background: it.accent }} />
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="w-9 h-9 shrink-0 rounded-lg grid place-items-center"
+                      style={{ background: `${it.accent}1f`, border: `1px solid ${it.accent}47` }}>
+                      <Icon size={17} style={{ color: it.accent }} />
+                    </span>
+                    <h3 className="text-base font-bold">{it.name}</h3>
+                  </div>
+                  <p className="text-sm text-[#8a8a9e] leading-relaxed mb-4">{it.desc}</p>
+                  <ul className="space-y-2">
+                    {it.points.map((p) => (
+                      <li key={p} className="flex items-center gap-2 text-sm text-[#c9c9d6]">
+                        <Check size={14} style={{ color: it.accent }} className="shrink-0" /> {p}
+                      </li>
+                    ))}
+                  </ul>
+                </SpotlightCard>
               </motion.div>
             )
           })}
@@ -284,7 +389,8 @@ export default function Landing() {
           </motion.p>
         </Reveal>
         <Reveal>
-          <motion.div variants={fadeUp} className="rounded-xl border border-white/[0.08] bg-[#111118] overflow-hidden">
+          <motion.div variants={fadeUp}>
+          <SpotlightCard className="rounded-xl border border-white/[0.08] bg-[#111118] overflow-hidden">
             <div className="grid grid-cols-[1fr_auto_auto] text-sm">
               <div className="px-5 py-3 text-[#5c5f70] text-xs font-bold uppercase tracking-wider border-b border-white/[0.06]">O que você precisa</div>
               <div className="px-5 py-3 text-[#5c5f70] text-xs font-bold uppercase tracking-wider border-b border-white/[0.06] text-center">Meta grátis</div>
@@ -301,6 +407,7 @@ export default function Landing() {
                 </div>
               ))}
             </div>
+          </SpotlightCard>
           </motion.div>
         </Reveal>
       </section>
@@ -308,7 +415,8 @@ export default function Landing() {
       {/* agência */}
       <section className="relative max-w-6xl mx-auto px-6 py-16">
         <Reveal>
-          <motion.div variants={fadeUp} className="rounded-2xl border border-white/[0.08] bg-[#0b0c12] p-8 md:p-12 overflow-hidden relative">
+          <motion.div variants={fadeUp}>
+          <SpotlightCard className="rounded-2xl border border-white/[0.08] bg-[#0b0c12] p-8 md:p-12 overflow-hidden">
             <div className="pointer-events-none absolute -top-24 -right-16 w-72 h-72 rounded-full bg-indigo-600/15 blur-[90px]" />
             <div className="relative grid md:grid-cols-2 gap-10 items-center">
               <div>
@@ -322,10 +430,10 @@ export default function Landing() {
                   Cada empresa-cliente vira uma conta-filha isolada. Você opera tudo pela agência e o dono
                   acompanha com o login dele — e você ainda entrega as automações prontas para cada um.
                 </p>
-                <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.98 }} onClick={() => navigate('/login')}
+                <MagneticButton onClick={() => navigate('/login')}
                   className="px-5 py-2.5 rounded-xl font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors">
                   Começar como agência
-                </motion.button>
+                </MagneticButton>
               </div>
               <ul className="grid gap-3">
                 {agencyPerks.map((p) => (
@@ -338,6 +446,7 @@ export default function Landing() {
                 ))}
               </ul>
             </div>
+          </SpotlightCard>
           </motion.div>
         </Reveal>
       </section>
@@ -355,10 +464,10 @@ export default function Landing() {
             Crie sua conta em minutos, conecte suas redes e comece a atender, publicar e anunciar do mesmo lugar.
           </motion.p>
           <motion.div variants={fadeUp} className="flex flex-wrap items-center justify-center gap-3">
-            <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.98 }} onClick={() => navigate('/login')}
+            <MagneticButton onClick={() => navigate('/login')}
               className="px-7 py-3.5 rounded-xl font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors flex items-center gap-2">
               Criar conta grátis <ArrowRight size={18} />
-            </motion.button>
+            </MagneticButton>
             <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.98 }} onClick={() => navigate('/login')}
               className="px-7 py-3.5 rounded-xl font-semibold border border-white/[0.12] hover:border-indigo-400/60 transition-colors">
               Entrar
