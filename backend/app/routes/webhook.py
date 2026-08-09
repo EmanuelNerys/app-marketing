@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -256,7 +257,13 @@ async def _build_person_context(
     uname = username or ""
     if token and user_id and not full_name:
         try:
-            prof = await instagram_service.get_user_profile(token, user_id)
+            # Timeout curto de propósito: é só personalização (fallback pro @usuario
+            # já existe). Sem isso, uma instabilidade da própria Graph API nesse
+            # endpoint segura a resposta/DM inteira atrás do retry com backoff
+            # (até ~7s) do instagram_service — o que importa é responder rápido.
+            prof = await asyncio.wait_for(
+                instagram_service.get_user_profile(token, user_id), timeout=3.0
+            )
             full_name = prof.get("name") or ""
             uname = uname or prof.get("username") or ""
         except Exception as exc:
