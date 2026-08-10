@@ -252,6 +252,12 @@ def _build_targeting(t: TargetingSpec) -> dict:
         "age_min": t.age_min,
         "age_max": t.age_max,
         "geo_locations": {"countries": t.country_codes or ["BR"]},
+        # Desde 2023 a Graph API exige essa flag explícita ao criar o ad set.
+        # advantage_audience=0 respeita exatamente a segmentação escolhida no
+        # formulário (idade/gênero/interesses), sem a Meta expandir o público
+        # por conta própria — é o que bate com a expectativa de quem preencheu
+        # esses campos manualmente.
+        "targeting_automation": {"advantage_audience": 0},
     }
     if t.genders:
         targeting["genders"] = t.genders
