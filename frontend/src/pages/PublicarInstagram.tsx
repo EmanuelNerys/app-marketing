@@ -256,6 +256,16 @@ export default function PublicarInstagram() {
     } catch {} finally { setLoadingAutomations(false) }
   }
 
+  function useAsTemplate(a: AutomationConfig) {
+    setTab('publish_auto')
+    setAutoEnabled(true)
+    setAutoKeyword(a.keyword)
+    setAutoCommentReply(a.comment_reply_message || '')
+    setAutoDmMessage(a.dm_message || '')
+    setAutoLinkMessage(a.link_message || '')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function toggleAutomation(a: AutomationConfig) {
     try {
       await api.put(`/automations/${a.id}`, { is_active: !a.is_active })
@@ -443,6 +453,11 @@ export default function PublicarInstagram() {
                         {a.dm_message && <p className="text-[#666] text-xs truncate mt-1">📩 DM: {a.dm_message}</p>}
                       </div>
                       <div className="flex gap-2 flex-shrink-0">
+                        <button onClick={() => useAsTemplate(a)}
+                          title="Copia a palavra-chave e as mensagens para o formulário de um novo post"
+                          className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 rounded-lg text-xs font-medium transition-colors">
+                          Usar como modelo
+                        </button>
                         <button onClick={() => toggleAutomation(a)}
                           className="px-2.5 py-1.5 bg-white/[0.04] hover:bg-white/[0.08] text-[#888] rounded-lg text-xs font-medium transition-colors">
                           {a.is_active ? 'Pausar' : 'Ativar'}
