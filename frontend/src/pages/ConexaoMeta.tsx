@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../services/api'
+import { useLang } from '../hooks/useLang'
+
+type T = (pt: string, en: string) => string
 
 type Provider = 'instagram' | 'whatsapp' | 'ads'
 
@@ -45,52 +48,56 @@ interface Connection {
 }
 
 /** Detalhe específico do provider mostrado no card quando conectado. */
-function connectionDetail(conn: Connection): string | null {
+function connectionDetail(conn: Connection, t: T): string | null {
   switch (conn.provider) {
     case 'whatsapp':
       return conn.phone_number
-        ? `Número: ${conn.phone_number}${conn.waba_id ? ` · WABA ${conn.waba_id}` : ''}`
+        ? `${t('Número', 'Number')}: ${conn.phone_number}${conn.waba_id ? ` · WABA ${conn.waba_id}` : ''}`
         : conn.waba_id ? `WABA: ${conn.waba_id}` : null
     case 'instagram':
       return conn.ig_business_account_id
-        ? `Conta IG: ${conn.ig_business_account_id}${conn.page_id ? ` · Página ${conn.page_id}` : ''}`
-        : conn.page_id ? `Página: ${conn.page_id}` : null
+        ? `${t('Conta IG', 'IG Account')}: ${conn.ig_business_account_id}${conn.page_id ? ` · ${t('Página', 'Page')} ${conn.page_id}` : ''}`
+        : conn.page_id ? `${t('Página', 'Page')}: ${conn.page_id}` : null
     case 'ads':
       return conn.ad_account_id ? `Ad Account: ${conn.ad_account_id}` : null
   }
 }
 
-const PROVIDERS: { key: Provider; label: string; icon: string; description: string; authBadge?: string }[] = [
-  {
-    key: 'instagram',
-    label: 'Instagram',
-    icon: '📸',
-    description: 'DMs, comentários, publicação de posts e mídias.',
-    authBadge: 'via Login do Instagram',
-  },
-  {
-    key: 'whatsapp',
-    label: 'WhatsApp Business',
-    icon: '💬',
-    description: 'Envio de mensagens e templates via WhatsApp Business.',
-    // Rótulo explícito exigido pela revisão de apps da Meta: o botão de
-    // Login do Facebook precisa ser identificável por quem não conhece o produto.
-    authBadge: 'via Login do Facebook',
-  },
-  {
-    key: 'ads',
-    label: 'Meta Ads',
-    icon: '📊',
-    description: 'Gerenciamento e análise de campanhas de anúncios.',
-    authBadge: 'via Login do Facebook',
-  },
-]
+function getProviders(t: T): { key: Provider; label: string; icon: string; description: string; authBadge?: string }[] {
+  return [
+    {
+      key: 'instagram',
+      label: 'Instagram',
+      icon: '📸',
+      description: t('DMs, comentários, publicação de posts e mídias.', 'DMs, comments, publishing posts and media.'),
+      authBadge: t('via Login do Instagram', 'via Instagram Login'),
+    },
+    {
+      key: 'whatsapp',
+      label: 'WhatsApp Business',
+      icon: '💬',
+      description: t('Envio de mensagens e templates via WhatsApp Business.', 'Sending messages and templates via WhatsApp Business.'),
+      // Rótulo explícito exigido pela revisão de apps da Meta: o botão de
+      // Login do Facebook precisa ser identificável por quem não conhece o produto.
+      authBadge: t('via Login do Facebook', 'via Facebook Login'),
+    },
+    {
+      key: 'ads',
+      label: 'Meta Ads',
+      icon: '📊',
+      description: t('Gerenciamento e análise de campanhas de anúncios.', 'Management and analysis of ad campaigns.'),
+      authBadge: t('via Login do Facebook', 'via Facebook Login'),
+    },
+  ]
+}
 
-const STATUS_LABEL: Record<Connection['status'], string> = {
-  active: 'Conectado',
-  expired: 'Expirado',
-  needs_reauth: 'Reautenticação necessária',
-  revoked: 'Revogado',
+function getStatusLabel(t: T): Record<Connection['status'], string> {
+  return {
+    active: t('Conectado', 'Connected'),
+    expired: t('Expirado', 'Expired'),
+    needs_reauth: t('Reautenticação necessária', 'Reauthentication required'),
+    revoked: t('Revogado', 'Revoked'),
+  }
 }
 
 const STATUS_COLOR: Record<Connection['status'], string> = {
@@ -103,6 +110,9 @@ const STATUS_COLOR: Record<Connection['status'], string> = {
 type ModalState = 'waiting' | 'success' | null
 
 export default function ConexaoMeta() {
+  const { t } = useLang()
+  const PROVIDERS = getProviders(t)
+  const STATUS_LABEL = getStatusLabel(t)
   const accountId = localStorage.getItem('tenant_id') ?? localStorage.getItem('account_id') ?? ''
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(true)
@@ -141,20 +151,25 @@ export default function ConexaoMeta() {
       if (data.event === 'CANCEL') {
         // v3 informa em qual etapa o usuário abandonou o fluxo
         if (data.data?.current_step) {
-          setWaError(`Cadastro cancelado na etapa "${data.data.current_step}". Tente novamente.`)
+          setWaError(t(
+            `Cadastro cancelado na etapa "${data.data.current_step}". Tente novamente.`,
+            `Signup cancelled at step "${data.data.current_step}". Please try again.`,
+          ))
         }
         setConnecting(null)
         setModal({ state: null, provider: null })
       } else if (data.event === 'ERROR') {
-        setWaError(data.data?.error_message || 'Erro no cadastro do WhatsApp.')
+        setWaError(data.data?.error_message || t('Erro no cadastro do WhatsApp.', 'Error signing up for WhatsApp.'))
         setConnecting(null)
         setModal({ state: null, provider: null })
       } else if (data.event === 'FINISH_ONLY_WABA') {
         // Conta criada sem número de telefone — não dá para enviar mensagens
-        setWaError(
+        setWaError(t(
           'A conta do WhatsApp Business foi criada, mas nenhum número de telefone foi adicionado. ' +
           'Refaça a conexão e adicione um número no fluxo.',
-        )
+          'The WhatsApp Business account was created, but no phone number was added. ' +
+          'Redo the connection and add a number in the flow.',
+        ))
         setConnecting(null)
         setModal({ state: null, provider: null })
       } else if (typeof data.event === 'string' && data.event.startsWith('FINISH')) {
@@ -187,7 +202,7 @@ export default function ConexaoMeta() {
       setModal({ state: 'success', provider: 'whatsapp' })
       loadConnections()
     } catch (err: any) {
-      setWaError(err.response?.data?.detail || 'Erro ao finalizar a conexão do WhatsApp.')
+      setWaError(err.response?.data?.detail || t('Erro ao finalizar a conexão do WhatsApp.', 'Error completing the WhatsApp connection.'))
       setModal({ state: null, provider: null })
     } finally {
       waCode.current = null
@@ -239,7 +254,7 @@ export default function ConexaoMeta() {
         },
       )
     } catch (err: any) {
-      setWaError(err.response?.data?.detail || 'Embedded Signup não configurado.')
+      setWaError(err.response?.data?.detail || t('Embedded Signup não configurado.', 'Embedded Signup not configured.'))
       setConnecting(null)
       setModal({ state: null, provider: null })
     }
@@ -264,7 +279,7 @@ export default function ConexaoMeta() {
       const res = await api.get<Connection[]>('/auth/meta/connections')
       setConnections(res.data)
     } catch {
-      setError('Erro ao carregar conexões.')
+      setError(t('Erro ao carregar conexões.', 'Error loading connections.'))
     } finally {
       setLoading(false)
     }
@@ -278,7 +293,7 @@ export default function ConexaoMeta() {
 
     const tid = localStorage.getItem('tenant_id')
     if (!tid) {
-      setError('Conta não identificada. Faça login primeiro.')
+      setError(t('Conta não identificada. Faça login primeiro.', 'Account not identified. Please log in first.'))
       return
     }
     setError('')
@@ -293,7 +308,7 @@ export default function ConexaoMeta() {
       const res = await api.get<{ auth_url: string }>(endpoint, { params })
 
       if (!res.data.auth_url) {
-        setError('Erro ao obter URL de autenticação.')
+        setError(t('Erro ao obter URL de autenticação.', 'Error getting authentication URL.'))
         setConnecting(null)
         setModal({ state: null, provider: null })
         return
@@ -335,7 +350,7 @@ export default function ConexaoMeta() {
       }
       window.addEventListener('message', onMessage)
     } catch {
-      setError('Erro de conexão com o servidor.')
+      setError(t('Erro de conexão com o servidor.', 'Server connection error.'))
       setConnecting(null)
       setModal({ state: null, provider: null })
     }
@@ -343,7 +358,10 @@ export default function ConexaoMeta() {
 
   async function handleDisconnect(connection: Connection) {
     const tid = localStorage.getItem('tenant_id')
-    if (!confirm(`Desconectar ${PROVIDERS.find(p => p.key === connection.provider)?.label}?`)) return
+    if (!confirm(t(
+      `Desconectar ${PROVIDERS.find(p => p.key === connection.provider)?.label}?`,
+      `Disconnect ${PROVIDERS.find(p => p.key === connection.provider)?.label}?`,
+    ))) return
     setDisconnecting(connection.id)
     setError('')
     try {
@@ -352,7 +370,7 @@ export default function ConexaoMeta() {
       })
       setConnections(prev => prev.filter(c => c.id !== connection.id))
     } catch {
-      setError('Erro ao desconectar. Tente novamente.')
+      setError(t('Erro ao desconectar. Tente novamente.', 'Error disconnecting. Please try again.'))
     } finally {
       setDisconnecting(null)
     }
@@ -369,9 +387,9 @@ export default function ConexaoMeta() {
   if (!accountId) {
     return (
       <div>
-        <h2 className="text-2xl font-bold text-[#e2e2e8] mb-6">Conexão Meta</h2>
+        <h2 className="text-2xl font-bold text-[#e2e2e8] mb-6">{t('Conexão Meta', 'Meta Connection')}</h2>
         <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-8 max-w-lg text-center">
-          <p className="text-[#555] text-sm">Complete o onboarding para conectar suas contas.</p>
+          <p className="text-[#555] text-sm">{t('Complete o onboarding para conectar suas contas.', 'Complete onboarding to connect your accounts.')}</p>
         </div>
       </div>
     )
@@ -381,9 +399,9 @@ export default function ConexaoMeta() {
   if (!token) {
     return (
       <div>
-        <h2 className="text-2xl font-bold text-[#e2e2e8] mb-6">Conexão Meta</h2>
+        <h2 className="text-2xl font-bold text-[#e2e2e8] mb-6">{t('Conexão Meta', 'Meta Connection')}</h2>
         <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-8 max-w-lg text-center">
-          <p className="text-[#555] text-sm">Faça login primeiro para conectar suas contas.</p>
+          <p className="text-[#555] text-sm">{t('Faça login primeiro para conectar suas contas.', 'Please log in first to connect your accounts.')}</p>
         </div>
       </div>
     )
@@ -391,9 +409,9 @@ export default function ConexaoMeta() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-[#e2e2e8] mb-2">Conexão Meta</h2>
+      <h2 className="text-2xl font-bold text-[#e2e2e8] mb-2">{t('Conexão Meta', 'Meta Connection')}</h2>
       <p className="text-[#555] text-sm mb-6">
-        Conecte suas contas do Instagram, WhatsApp e Meta Ads para automatizar a gestão.
+        {t('Conecte suas contas do Instagram, WhatsApp e Meta Ads para automatizar a gestão.', 'Connect your Instagram, WhatsApp and Meta Ads accounts to automate management.')}
       </p>
 
       {error && (
@@ -408,7 +426,7 @@ export default function ConexaoMeta() {
       )}
 
       {loading ? (
-        <div className="text-[#555] text-sm">Carregando conexões...</div>
+        <div className="text-[#555] text-sm">{t('Carregando conexões...', 'Loading connections...')}</div>
       ) : (
         <div className="grid gap-4 max-w-2xl">
           {PROVIDERS.map(({ key, label, icon, description, authBadge }) => {
@@ -438,12 +456,12 @@ export default function ConexaoMeta() {
                   {authBadge && (
                     <p className="text-indigo-400/70 text-[11px] mt-1 font-medium">{authBadge}</p>
                   )}
-                  {conn && isConnected && connectionDetail(conn) && (
-                    <p className="text-emerald-400/80 text-xs mt-1 truncate">{connectionDetail(conn)}</p>
+                  {conn && isConnected && connectionDetail(conn, t) && (
+                    <p className="text-emerald-400/80 text-xs mt-1 truncate">{connectionDetail(conn, t)}</p>
                   )}
                   {conn?.expires_at && (
                     <p className="text-[#444] text-xs mt-1">
-                      Expira em: {new Date(conn.expires_at).toLocaleDateString('pt-BR')}
+                      {t('Expira em', 'Expires on')}: {new Date(conn.expires_at).toLocaleDateString(t('pt-BR', 'en-US'))}
                     </p>
                   )}
                 </div>
@@ -455,7 +473,7 @@ export default function ConexaoMeta() {
                       disabled={disconnecting === conn.id}
                       className="px-3 py-1.5 bg-red-900/20 text-red-400 rounded-lg text-xs font-medium hover:bg-red-900/40 transition-colors disabled:opacity-50"
                     >
-                      {disconnecting === conn.id ? 'Removendo...' : 'Desconectar'}
+                      {disconnecting === conn.id ? t('Removendo...', 'Removing...') : t('Desconectar', 'Disconnect')}
                     </button>
                   ) : (
                     <button
@@ -463,7 +481,7 @@ export default function ConexaoMeta() {
                       disabled={connecting === key}
                       className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white rounded-lg text-xs font-semibold transition-colors"
                     >
-                      {connecting === key ? 'Aguardando...' : needsAction ? 'Reconectar' : 'Conectar'}
+                      {connecting === key ? t('Aguardando...', 'Waiting...') : needsAction ? t('Reconectar', 'Reconnect') : t('Conectar', 'Connect')}
                     </button>
                   )}
                 </div>
@@ -496,11 +514,11 @@ export default function ConexaoMeta() {
                     <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center mb-5 shadow-lg`}>
                       <span className="text-3xl">{icon}</span>
                     </div>
-                    <h3 className="text-[#e2e2e8] font-semibold text-base mb-2">Conectando {label}</h3>
+                    <h3 className="text-[#e2e2e8] font-semibold text-base mb-2">{t(`Conectando ${label}`, `Connecting ${label}`)}</h3>
                     <p className="text-[#555] text-sm mb-6">
                       {isWa
-                        ? 'Complete o cadastro na janela do Facebook que abriu. Aguardando...'
-                        : `Autorize o acesso na janela do ${label} que abriu. Aguardando...`}
+                        ? t('Complete o cadastro na janela do Facebook que abriu. Aguardando...', 'Complete the signup in the Facebook window that opened. Waiting...')
+                        : t(`Autorize o acesso na janela do ${label} que abriu. Aguardando...`, `Authorize access in the ${label} window that opened. Waiting...`)}
                     </p>
                     <div className="flex gap-1.5 mb-6">
                       {[0, 1, 2].map(i => (
@@ -515,7 +533,7 @@ export default function ConexaoMeta() {
                       onClick={closeModal}
                       className="text-[#444] text-xs hover:text-[#666] transition-colors"
                     >
-                      Cancelar
+                      {t('Cancelar', 'Cancel')}
                     </button>
                   </>
                 ) : (
@@ -528,20 +546,20 @@ export default function ConexaoMeta() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
                     </div>
-                    <h3 className="text-[#e2e2e8] font-semibold text-base mb-1">{label} conectado!</h3>
+                    <h3 className="text-[#e2e2e8] font-semibold text-base mb-1">{t(`${label} conectado!`, `${label} connected!`)}</h3>
                     {modal.username && (
                       <p className="text-indigo-400 text-sm font-medium mb-1">@{modal.username}</p>
                     )}
                     <p className="text-[#555] text-xs mb-6">
                       {isWa
-                        ? 'Seu número está pronto para enviar e receber mensagens.'
-                        : 'Sua conta está pronta para DMs, comentários e publicações.'}
+                        ? t('Seu número está pronto para enviar e receber mensagens.', 'Your number is ready to send and receive messages.')
+                        : t('Sua conta está pronta para DMs, comentários e publicações.', 'Your account is ready for DMs, comments and publishing.')}
                     </p>
                     <button
                       onClick={closeModal}
                       className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors"
                     >
-                      Fechar
+                      {t('Fechar', 'Close')}
                     </button>
                   </>
                 )}

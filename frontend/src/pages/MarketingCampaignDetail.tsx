@@ -5,6 +5,7 @@ import {
   X, Image as ImageIcon, Video, GalleryHorizontal, Search, Copy, Camera,
 } from 'lucide-react'
 import api from '../services/api'
+import { useLang } from '../hooks/useLang'
 
 interface Campaign {
   id: string
@@ -63,13 +64,15 @@ interface BreakdownRow {
   results: number
 }
 
-const BREAKDOWN_DIMS: { value: string; label: string }[] = [
-  { value: 'age', label: 'Idade' },
-  { value: 'gender', label: 'Gênero' },
-  { value: 'publisher_platform', label: 'Plataforma' },
-  { value: 'impression_device', label: 'Dispositivo' },
-  { value: 'region', label: 'Região' },
-]
+function getBreakdownDims(t: (pt: string, en: string) => string): { value: string; label: string }[] {
+  return [
+    { value: 'age', label: t('Idade', 'Age') },
+    { value: 'gender', label: t('Gênero', 'Gender') },
+    { value: 'publisher_platform', label: t('Plataforma', 'Platform') },
+    { value: 'impression_device', label: t('Dispositivo', 'Device') },
+    { value: 'region', label: t('Região', 'Region') },
+  ]
+}
 
 interface TargetingOption {
   id: string
@@ -119,6 +122,7 @@ function TargetingSearch({
   onAdd: (opt: TargetingOption) => void
   onRemove: (id: string) => void
 }) {
+  const { t } = useLang()
   const [q, setQ] = useState('')
   const [results, setResults] = useState<TargetingOption[]>([])
   const [searching, setSearching] = useState(false)
@@ -152,16 +156,16 @@ function TargetingSearch({
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Digite para buscar…"
+          placeholder={t('Digite para buscar…', 'Type to search…')}
           className="w-full pl-8 pr-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none"
         />
       </div>
       {q.trim().length >= 2 && (
         <div className="mt-1 bg-[#0a0a0f] border border-white/[0.08] rounded-lg max-h-40 overflow-y-auto">
           {searching ? (
-            <p className="text-[11px] text-[#555] px-3 py-2">Buscando…</p>
+            <p className="text-[11px] text-[#555] px-3 py-2">{t('Buscando…', 'Searching…')}</p>
           ) : results.length === 0 ? (
-            <p className="text-[11px] text-[#555] px-3 py-2">Nenhum resultado.</p>
+            <p className="text-[11px] text-[#555] px-3 py-2">{t('Nenhum resultado.', 'No results.')}</p>
           ) : (
             results.map((r) => (
               <button
@@ -196,6 +200,8 @@ function TargetingSearch({
 }
 
 export default function MarketingCampaignDetail() {
+  const { t } = useLang()
+  const BREAKDOWN_DIMS = getBreakdownDims(t)
   const { campaignId } = useParams<{ campaignId: string }>()
 
   const [campaign, setCampaign] = useState<Campaign | null>(null)
@@ -259,7 +265,7 @@ export default function MarketingCampaignDetail() {
       const { data } = await api.get<AdSet[]>(`/marketing/campaigns/${campaignId}/ad-sets`)
       setAdSets(data)
     } catch {
-      setError('Erro ao carregar conjuntos de anúncios.')
+      setError(t('Erro ao carregar conjuntos de anúncios.', 'Error loading ad sets.'))
     } finally {
       setLoading(false)
     }
@@ -320,20 +326,20 @@ export default function MarketingCampaignDetail() {
       await api.patch(`/marketing/ad-sets/${as.id}`, { status: as.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' })
       await loadAdSets()
     } catch {
-      setError('Erro ao atualizar conjunto.')
+      setError(t('Erro ao atualizar conjunto.', 'Error updating ad set.'))
     } finally {
       setBusyId(null)
     }
   }
 
   async function deleteAdSet(as: AdSet) {
-    if (!confirm(`Excluir o conjunto "${as.name}"?`)) return
+    if (!confirm(t(`Excluir o conjunto "${as.name}"?`, `Delete the ad set "${as.name}"?`))) return
     setBusyId(as.id)
     try {
       await api.delete(`/marketing/ad-sets/${as.id}`)
       setAdSets((prev) => prev.filter((x) => x.id !== as.id))
     } catch {
-      setError('Erro ao excluir conjunto.')
+      setError(t('Erro ao excluir conjunto.', 'Error deleting ad set.'))
     } finally {
       setBusyId(null)
     }
@@ -345,20 +351,20 @@ export default function MarketingCampaignDetail() {
       await api.patch(`/marketing/ads/${ad.id}`, { status: ad.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' })
       await loadAds(adSetId)
     } catch {
-      setError('Erro ao atualizar anúncio.')
+      setError(t('Erro ao atualizar anúncio.', 'Error updating ad.'))
     } finally {
       setBusyId(null)
     }
   }
 
   async function deleteAd(adSetId: string, ad: Ad) {
-    if (!confirm(`Excluir o anúncio "${ad.name}"?`)) return
+    if (!confirm(t(`Excluir o anúncio "${ad.name}"?`, `Delete the ad "${ad.name}"?`))) return
     setBusyId(ad.id)
     try {
       await api.delete(`/marketing/ads/${ad.id}`)
       setAdsBySet((prev) => ({ ...prev, [adSetId]: (prev[adSetId] || []).filter((a) => a.id !== ad.id) }))
     } catch {
-      setError('Erro ao excluir anúncio.')
+      setError(t('Erro ao excluir anúncio.', 'Error deleting ad.'))
     } finally {
       setBusyId(null)
     }
@@ -370,7 +376,7 @@ export default function MarketingCampaignDetail() {
       await api.post(`/marketing/ad-sets/${as.id}/copy`)
       await loadAdSets()
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Erro ao duplicar conjunto.')
+      setError(err.response?.data?.detail || t('Erro ao duplicar conjunto.', 'Error duplicating ad set.'))
     } finally {
       setBusyId(null)
     }
@@ -382,7 +388,7 @@ export default function MarketingCampaignDetail() {
       await api.post(`/marketing/ads/${ad.id}/copy`)
       await loadAds(adSetId)
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Erro ao duplicar anúncio.')
+      setError(err.response?.data?.detail || t('Erro ao duplicar anúncio.', 'Error duplicating ad.'))
     } finally {
       setBusyId(null)
     }
@@ -417,7 +423,7 @@ export default function MarketingCampaignDetail() {
       setShowAdSetModal(false)
       await loadAdSets()
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Erro ao criar conjunto de anúncios.')
+      setError(err.response?.data?.detail || t('Erro ao criar conjunto de anúncios.', 'Error creating ad set.'))
     } finally {
       setCreatingAdSet(false)
     }
@@ -439,7 +445,7 @@ export default function MarketingCampaignDetail() {
       const { data } = await api.get<IgPost[]>('/marketing/instagram-posts')
       setIgPosts(data)
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Não foi possível carregar seus posts do Instagram.')
+      setError(err.response?.data?.detail || t('Não foi possível carregar seus posts do Instagram.', 'Could not load your Instagram posts.'))
     } finally {
       setLoadingPosts(false)
     }
@@ -472,7 +478,7 @@ export default function MarketingCampaignDetail() {
 
       setAdModalStep('creating_creative')
       const creativePayload: Record<string, unknown> = {
-        name: `${adName.trim()} — criativo`,
+        name: t(`${adName.trim()} — criativo`, `${adName.trim()} — creative`),
         message: creativeMessage.trim(),
       }
       if (creativeKind === 'post') {
@@ -503,7 +509,7 @@ export default function MarketingCampaignDetail() {
       setShowAdModal(null)
       await loadAds(adSetId)
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Erro ao criar anúncio.')
+      setError(err.response?.data?.detail || t('Erro ao criar anúncio.', 'Error creating ad.'))
     } finally {
       setCreatingAd(false)
       setAdModalStep('idle')
@@ -516,16 +522,16 @@ export default function MarketingCampaignDetail() {
     <div>
       <Link to="/app/marketing" className="inline-flex items-center gap-1.5 text-[#5a5a6e] hover:text-[#c0c0d0] text-sm mb-4 no-underline transition-colors">
         <ArrowLeft size={15} />
-        Campanhas
+        {t('Campanhas', 'Campaigns')}
       </Link>
 
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-[#e2e2e8]">{campaign?.name || 'Campanha'}</h2>
+          <h2 className="text-2xl font-bold text-[#e2e2e8]">{campaign?.name || t('Campanha', 'Campaign')}</h2>
           {campaign && (
             <p className="text-[#555] text-sm mt-1">
-              {campaign.status === 'ACTIVE' ? 'Ativa' : 'Pausada'}
-              {campaign.daily_budget && ` · ${centsToBRL(campaign.daily_budget)}/dia`}
+              {campaign.status === 'ACTIVE' ? t('Ativa', 'Active') : t('Pausada', 'Paused')}
+              {campaign.daily_budget && ` · ${centsToBRL(campaign.daily_budget)}/${t('dia', 'day')}`}
             </p>
           )}
         </div>
@@ -534,7 +540,7 @@ export default function MarketingCampaignDetail() {
           className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors"
         >
           <Plus size={15} />
-          Novo conjunto de anúncios
+          {t('Novo conjunto de anúncios', 'New Ad Set')}
         </button>
       </div>
 
@@ -545,7 +551,7 @@ export default function MarketingCampaignDetail() {
       {/* Gráfico de gastos (últimos 30 dias) */}
       {insights.length > 0 && (
         <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-5 mb-6">
-          <p className="text-[#555] text-xs mb-3">Gastos por dia — últimos 30 dias</p>
+          <p className="text-[#555] text-xs mb-3">{t('Gastos por dia — últimos 30 dias', 'Daily spend — last 30 days')}</p>
           <div className="flex items-end gap-0.5 h-24">
             {insights.map((p) => (
               <div
@@ -562,7 +568,7 @@ export default function MarketingCampaignDetail() {
       {/* Desempenho por segmento (breakdowns) */}
       <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-5 mb-6 max-w-4xl">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <p className="text-sm font-semibold text-[#e2e2e8]">Desempenho por segmento</p>
+          <p className="text-sm font-semibold text-[#e2e2e8]">{t('Desempenho por segmento', 'Performance by segment')}</p>
           <div className="flex gap-1 bg-[#0a0a0f] border border-white/[0.08] rounded-lg p-1">
             {BREAKDOWN_DIMS.map((d) => (
               <button
@@ -576,19 +582,19 @@ export default function MarketingCampaignDetail() {
           </div>
         </div>
         {loadingBreakdown ? (
-          <p className="text-[#555] text-sm">Carregando…</p>
+          <p className="text-[#555] text-sm">{t('Carregando…', 'Loading…')}</p>
         ) : breakdownRows.length === 0 ? (
-          <p className="text-[#555] text-sm">Sem dados neste período (a campanha precisa ter tido entrega/gasto).</p>
+          <p className="text-[#555] text-sm">{t('Sem dados neste período (a campanha precisa ter tido entrega/gasto).', 'No data for this period (the campaign needs to have had delivery/spend).')}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[#555] text-xs text-left">
-                  <th className="pb-2 pr-4">Segmento</th>
-                  <th className="pb-2 pr-4 text-right">Gasto</th>
-                  <th className="pb-2 pr-4 text-right">Resultados</th>
-                  <th className="pb-2 pr-4 text-right">Alcance</th>
-                  <th className="pb-2 pr-4 text-right">Cliques</th>
+                  <th className="pb-2 pr-4">{t('Segmento', 'Segment')}</th>
+                  <th className="pb-2 pr-4 text-right">{t('Gasto', 'Spend')}</th>
+                  <th className="pb-2 pr-4 text-right">{t('Resultados', 'Results')}</th>
+                  <th className="pb-2 pr-4 text-right">{t('Alcance', 'Reach')}</th>
+                  <th className="pb-2 pr-4 text-right">{t('Cliques', 'Clicks')}</th>
                   <th className="pb-2 text-right">CTR</th>
                 </tr>
               </thead>
@@ -611,10 +617,10 @@ export default function MarketingCampaignDetail() {
 
       {/* Conjuntos de anúncios */}
       {loading ? (
-        <div className="text-[#555] text-sm">Carregando...</div>
+        <div className="text-[#555] text-sm">{t('Carregando...', 'Loading...')}</div>
       ) : adSets.length === 0 ? (
         <div className="bg-[#111118] rounded-xl border border-white/[0.06] p-12 text-center">
-          <p className="text-[#555]">Nenhum conjunto de anúncios ainda. Crie um para começar a segmentar.</p>
+          <p className="text-[#555]">{t('Nenhum conjunto de anúncios ainda. Crie um para começar a segmentar.', 'No ad set yet. Create one to start targeting.')}</p>
         </div>
       ) : (
         <div className="space-y-3 max-w-4xl">
@@ -631,15 +637,15 @@ export default function MarketingCampaignDetail() {
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpand(as.id)}>
                     <h4 className="text-white font-bold text-base truncate hover:text-indigo-400 transition-colors">{as.name}</h4>
                     <p className="text-[#888] text-xs mt-1 flex items-center gap-2">
-                      <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{centsToBRL(as.daily_budget)}/dia</span>
-                      {as.bid_amount && <span>· lance {centsToBRL(as.bid_amount)}</span>}
+                      <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{centsToBRL(as.daily_budget)}/{t('dia', 'day')}</span>
+                      {as.bid_amount && <span>· {t('lance', 'bid')} {centsToBRL(as.bid_amount)}</span>}
                       {as.optimization_goal && <span>· {as.optimization_goal}</span>}
                     </p>
                   </div>
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 ${
                     as.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-white/[0.05] text-[#888] border border-white/[0.05]'
                   }`}>
-                    {as.status === 'ACTIVE' ? 'Ativo' : 'Pausado'}
+                    {as.status === 'ACTIVE' ? t('Ativo', 'Active') : t('Pausado', 'Paused')}
                   </span>
                   <button
                     onClick={() => toggleAdSetStatus(as)}
@@ -651,7 +657,7 @@ export default function MarketingCampaignDetail() {
                   <button
                     onClick={() => duplicateAdSet(as)}
                     disabled={busy}
-                    title="Duplicar conjunto (cópia pausada)"
+                    title={t('Duplicar conjunto (cópia pausada)', 'Duplicate ad set (paused copy)')}
                     className="w-9 h-9 shrink-0 rounded-xl bg-white/[0.04] hover:bg-emerald-500/20 text-[#8a8a9e] hover:text-emerald-400 flex items-center justify-center transition-colors disabled:opacity-40"
                   >
                     <Copy size={14} />
@@ -667,27 +673,27 @@ export default function MarketingCampaignDetail() {
 
                 {adSetInsights[as.id] && (
                   <div className="px-5 pb-4 -mt-2 flex flex-wrap gap-x-6 gap-y-1">
-                    <PerfMetric label="Gasto" value={`R$ ${adSetInsights[as.id].spend.toFixed(2)}`} />
-                    <PerfMetric label={adSetInsights[as.id].result_label || 'Resultados'} value={adSetInsights[as.id].results ? adSetInsights[as.id].results.toLocaleString() : '—'} />
-                    <PerfMetric label="Custo/result." value={adSetInsights[as.id].cost_per_result ? `R$ ${adSetInsights[as.id].cost_per_result.toFixed(2)}` : '—'} />
+                    <PerfMetric label={t('Gasto', 'Spend')} value={`R$ ${adSetInsights[as.id].spend.toFixed(2)}`} />
+                    <PerfMetric label={adSetInsights[as.id].result_label || t('Resultados', 'Results')} value={adSetInsights[as.id].results ? adSetInsights[as.id].results.toLocaleString() : '—'} />
+                    <PerfMetric label={t('Custo/result.', 'Cost/result')} value={adSetInsights[as.id].cost_per_result ? `R$ ${adSetInsights[as.id].cost_per_result.toFixed(2)}` : '—'} />
                     <PerfMetric label="CTR" value={`${adSetInsights[as.id].ctr.toFixed(2)}%`} />
-                    <PerfMetric label="Alcance" value={adSetInsights[as.id].reach ? adSetInsights[as.id].reach.toLocaleString() : '—'} />
+                    <PerfMetric label={t('Alcance', 'Reach')} value={adSetInsights[as.id].reach ? adSetInsights[as.id].reach.toLocaleString() : '—'} />
                   </div>
                 )}
 
                 {isOpen && (
                   <div className="border-t border-white/[0.06] p-5 bg-black/20">
                     <div className="flex items-center justify-between mb-4">
-                      <p className="text-[12px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-2"><ImageIcon size={14} /> Anúncios</p>
+                      <p className="text-[12px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-2"><ImageIcon size={14} /> {t('Anúncios', 'Ads')}</p>
                       <button
                         onClick={() => openAdModal(as.id)}
                         className="flex items-center gap-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg font-medium shadow-lg shadow-indigo-500/20 transition-all"
                       >
-                        <Plus size={14} /> Novo anúncio
+                        <Plus size={14} /> {t('Novo anúncio', 'New Ad')}
                       </button>
                     </div>
                     {ads.length === 0 ? (
-                      <p className="text-[#444] text-xs py-2">Nenhum anúncio neste conjunto ainda.</p>
+                      <p className="text-[#444] text-xs py-2">{t('Nenhum anúncio neste conjunto ainda.', 'No ad in this set yet.')}</p>
                     ) : (
                       <div className="space-y-2">
                         {ads.map((ad) => (
@@ -704,9 +710,9 @@ export default function MarketingCampaignDetail() {
                               <p className="text-[#888] text-xs truncate mt-0.5">{ad.creative_name}</p>
                               {adInsights[ad.id] && (
                                 <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5 text-[11px] text-[#888]">
-                                  <span>Gasto <b className="text-[#c0c0d0]">R$ {adInsights[ad.id].spend.toFixed(2)}</b></span>
-                                  <span>{adInsights[ad.id].result_label || 'Result.'} <b className="text-[#c0c0d0]">{adInsights[ad.id].results ? adInsights[ad.id].results.toLocaleString() : '—'}</b></span>
-                                  <span>Custo/res. <b className="text-[#c0c0d0]">{adInsights[ad.id].cost_per_result ? `R$ ${adInsights[ad.id].cost_per_result.toFixed(2)}` : '—'}</b></span>
+                                  <span>{t('Gasto', 'Spend')} <b className="text-[#c0c0d0]">R$ {adInsights[ad.id].spend.toFixed(2)}</b></span>
+                                  <span>{adInsights[ad.id].result_label || t('Result.', 'Result.')} <b className="text-[#c0c0d0]">{adInsights[ad.id].results ? adInsights[ad.id].results.toLocaleString() : '—'}</b></span>
+                                  <span>{t('Custo/res.', 'Cost/res.')} <b className="text-[#c0c0d0]">{adInsights[ad.id].cost_per_result ? `R$ ${adInsights[ad.id].cost_per_result.toFixed(2)}` : '—'}</b></span>
                                   <span>CTR <b className="text-[#c0c0d0]">{adInsights[ad.id].ctr.toFixed(2)}%</b></span>
                                 </div>
                               )}
@@ -714,7 +720,7 @@ export default function MarketingCampaignDetail() {
                             <span className={`text-[10px] font-bold px-2 py-1 rounded-md shrink-0 ${
                               ad.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-white/[0.05] text-[#888] border border-white/[0.05]'
                             }`}>
-                              {ad.status === 'ACTIVE' ? 'Ativo' : 'Pausado'}
+                              {ad.status === 'ACTIVE' ? t('Ativo', 'Active') : t('Pausado', 'Paused')}
                             </span>
                             <button
                               onClick={() => toggleAdStatus(as.id, ad)}
@@ -726,7 +732,7 @@ export default function MarketingCampaignDetail() {
                             <button
                               onClick={() => duplicateAd(as.id, ad)}
                               disabled={busyId === ad.id}
-                              title="Duplicar anúncio (cópia pausada)"
+                              title={t('Duplicar anúncio (cópia pausada)', 'Duplicate ad (paused copy)')}
                               className="w-8 h-8 shrink-0 rounded-lg bg-white/[0.04] hover:bg-emerald-500/20 text-[#8a8a9e] hover:text-emerald-400 flex items-center justify-center transition-colors disabled:opacity-40"
                             >
                               <Copy size={13} />
@@ -755,22 +761,22 @@ export default function MarketingCampaignDetail() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-8 overflow-y-auto">
           <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-6 w-full max-w-lg my-auto">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="text-base font-semibold text-white">Novo conjunto de anúncios</h3>
+              <h3 className="text-base font-semibold text-white">{t('Novo conjunto de anúncios', 'New Ad Set')}</h3>
               <button onClick={() => setShowAdSetModal(false)} className="text-[#444] hover:text-[#888]"><X size={18} /></button>
             </div>
             <form onSubmit={createAdSet} className="space-y-4">
               <div>
-                <label className="block text-[11px] text-[#666] mb-1">Nome</label>
+                <label className="block text-[11px] text-[#666] mb-1">{t('Nome', 'Name')}</label>
                 <input
                   value={asName}
                   onChange={(e) => setAsName(e.target.value)}
-                  placeholder="Ex: Mulheres 25-45 — Grande SP"
+                  placeholder={t('Ex: Mulheres 25-45 — Grande SP', 'E.g.: Women 25-45 — Greater NY')}
                   className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] text-[#666] mb-1">Orçamento diário (R$)</label>
+                  <label className="block text-[11px] text-[#666] mb-1">{t('Orçamento diário (R$)', 'Daily budget (R$)')}</label>
                   <input
                     type="number" step="0.01" min="1" value={asBudget}
                     onChange={(e) => setAsBudget(e.target.value)}
@@ -778,36 +784,36 @@ export default function MarketingCampaignDetail() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-[#666] mb-1">Lance máx. (R$, opcional)</label>
+                  <label className="block text-[11px] text-[#666] mb-1">{t('Lance máx. (R$, opcional)', 'Max bid (R$, optional)')}</label>
                   <input
                     type="number" step="0.01" min="0" value={asBid}
                     onChange={(e) => setAsBid(e.target.value)}
-                    placeholder="Automático"
+                    placeholder={t('Automático', 'Automatic')}
                     className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-[11px] text-[#666] mb-1">Otimização</label>
+                <label className="block text-[11px] text-[#666] mb-1">{t('Otimização', 'Optimization')}</label>
                 <select
                   value={asOptGoal}
                   onChange={(e) => setAsOptGoal(e.target.value)}
                   className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none"
                 >
-                  <option value="REACH">Alcance</option>
-                  <option value="LINK_CLICKS">Cliques no link</option>
-                  <option value="LEAD_GENERATION">Geração de leads</option>
-                  <option value="IMPRESSIONS">Impressões</option>
-                  <option value="CONVERSATIONS">Conversas</option>
+                  <option value="REACH">{t('Alcance', 'Reach')}</option>
+                  <option value="LINK_CLICKS">{t('Cliques no link', 'Link clicks')}</option>
+                  <option value="LEAD_GENERATION">{t('Geração de leads', 'Lead generation')}</option>
+                  <option value="IMPRESSIONS">{t('Impressões', 'Impressions')}</option>
+                  <option value="CONVERSATIONS">{t('Conversas', 'Conversations')}</option>
                 </select>
               </div>
 
               <div className="h-px bg-white/[0.06]" />
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#444]">Segmentação</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#444]">{t('Segmentação', 'Targeting')}</p>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] text-[#666] mb-1">Idade mínima</label>
+                  <label className="block text-[11px] text-[#666] mb-1">{t('Idade mínima', 'Minimum age')}</label>
                   <input
                     type="number" min="13" max="65" value={asAgeMin}
                     onChange={(e) => setAsAgeMin(parseInt(e.target.value) || 18)}
@@ -815,7 +821,7 @@ export default function MarketingCampaignDetail() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-[#666] mb-1">Idade máxima</label>
+                  <label className="block text-[11px] text-[#666] mb-1">{t('Idade máxima', 'Maximum age')}</label>
                   <input
                     type="number" min="13" max="65" value={asAgeMax}
                     onChange={(e) => setAsAgeMax(parseInt(e.target.value) || 65)}
@@ -825,9 +831,9 @@ export default function MarketingCampaignDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] text-[#666] mb-1">Gênero</label>
+                <label className="block text-[11px] text-[#666] mb-1">{t('Gênero', 'Gender')}</label>
                 <div className="flex gap-2">
-                  {([['all', 'Todos'], ['male', 'Masculino'], ['female', 'Feminino']] as const).map(([val, label]) => (
+                  {([['all', t('Todos', 'All')], ['male', t('Masculino', 'Male')], ['female', t('Feminino', 'Female')]] as const).map(([val, label]) => (
                     <button
                       key={val}
                       type="button"
@@ -845,7 +851,7 @@ export default function MarketingCampaignDetail() {
               </div>
 
               <div>
-                <label className="block text-[11px] text-[#666] mb-1">Países (códigos separados por vírgula)</label>
+                <label className="block text-[11px] text-[#666] mb-1">{t('Países (códigos separados por vírgula)', 'Countries (comma-separated codes)')}</label>
                 <input
                   value={asCountries}
                   onChange={(e) => setAsCountries(e.target.value)}
@@ -855,7 +861,7 @@ export default function MarketingCampaignDetail() {
               </div>
 
               <TargetingSearch
-                label="Interesses (opcional)"
+                label={t('Interesses (opcional)', 'Interests (optional)')}
                 endpoint="/marketing/targeting/interests"
                 selected={asInterests}
                 onAdd={(opt) => setAsInterests((prev) => (prev.some((p) => p.id === opt.id) ? prev : [...prev, opt]))}
@@ -868,14 +874,14 @@ export default function MarketingCampaignDetail() {
                   onClick={() => setShowAdSetModal(false)}
                   className="flex-1 py-2.5 border border-white/[0.08] text-[#666] hover:text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  Cancelar
+                  {t('Cancelar', 'Cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={creatingAdSet || !asName.trim()}
                   className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
                 >
-                  {creatingAdSet ? 'Criando…' : 'Criar conjunto'}
+                  {creatingAdSet ? t('Criando…', 'Creating…') : t('Criar conjunto', 'Create Ad Set')}
                 </button>
               </div>
             </form>
@@ -888,23 +894,23 @@ export default function MarketingCampaignDetail() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-8 overflow-y-auto">
           <div className="bg-[#111118] border border-white/[0.08] rounded-2xl p-6 w-full max-w-lg my-auto">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="text-base font-semibold text-white">Novo anúncio</h3>
+              <h3 className="text-base font-semibold text-white">{t('Novo anúncio', 'New Ad')}</h3>
               <button onClick={() => setShowAdModal(null)} className="text-[#444] hover:text-[#888]"><X size={18} /></button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-[11px] text-[#666] mb-1">Nome do anúncio</label>
+                <label className="block text-[11px] text-[#666] mb-1">{t('Nome do anúncio', 'Ad name')}</label>
                 <input
                   value={adName}
                   onChange={(e) => setAdName(e.target.value)}
-                  placeholder="Ex: Anúncio — Carrossel Coleção Verão"
+                  placeholder={t('Ex: Anúncio — Carrossel Coleção Verão', 'E.g.: Ad — Summer Collection Carousel')}
                   className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-4 gap-2">
-                {([['image', 'Imagem', ImageIcon], ['video', 'Vídeo', Video], ['carousel', 'Carrossel', GalleryHorizontal], ['post', 'Post IG', Camera]] as const).map(([val, label, Icon]) => (
+                {([['image', t('Imagem', 'Image'), ImageIcon], ['video', t('Vídeo', 'Video'), Video], ['carousel', t('Carrossel', 'Carousel'), GalleryHorizontal], ['post', t('Post IG', 'IG Post'), Camera]] as const).map(([val, label, Icon]) => (
                   <button
                     key={val}
                     type="button"
@@ -923,12 +929,12 @@ export default function MarketingCampaignDetail() {
 
               {creativeKind !== 'post' && (
                 <div>
-                  <label className="block text-[11px] text-[#666] mb-1">Texto do anúncio</label>
+                  <label className="block text-[11px] text-[#666] mb-1">{t('Texto do anúncio', 'Ad text')}</label>
                   <textarea
                     value={creativeMessage}
                     onChange={(e) => setCreativeMessage(e.target.value)}
                     rows={3}
-                    placeholder="Ex.: Frete grátis em compras acima de R$150!"
+                    placeholder={t('Ex.: Frete grátis em compras acima de R$150!', 'E.g.: Free shipping on orders over $150!')}
                     className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-sm rounded-lg focus:border-indigo-500 focus:outline-none resize-none"
                   />
                 </div>
@@ -936,7 +942,7 @@ export default function MarketingCampaignDetail() {
 
               <div>
                 <label className="block text-[11px] text-[#666] mb-1">
-                  Link de destino {creativeKind === 'post' ? '(obrigatório)' : '(opcional)'}
+                  {t('Link de destino', 'Destination link')} {creativeKind === 'post' ? t('(obrigatório)', '(required)') : t('(opcional)', '(optional)')}
                 </label>
                 <input
                   value={creativeLinkUrl}
@@ -948,11 +954,11 @@ export default function MarketingCampaignDetail() {
 
               {creativeKind === 'post' && (
                 <div>
-                  <label className="block text-[11px] text-[#666] mb-2">Escolha o post para impulsionar</label>
+                  <label className="block text-[11px] text-[#666] mb-2">{t('Escolha o post para impulsionar', 'Choose the post to boost')}</label>
                   {loadingPosts ? (
-                    <p className="text-[#555] text-sm">Carregando seus posts…</p>
+                    <p className="text-[#555] text-sm">{t('Carregando seus posts…', 'Loading your posts…')}</p>
                   ) : igPosts.length === 0 ? (
-                    <p className="text-[#555] text-sm">Nenhum post encontrado (a conta do Instagram precisa estar vinculada a uma Página do Facebook).</p>
+                    <p className="text-[#555] text-sm">{t('Nenhum post encontrado (a conta do Instagram precisa estar vinculada a uma Página do Facebook).', 'No post found (the Instagram account needs to be linked to a Facebook Page).')}</p>
                   ) : (
                     <div className="grid grid-cols-4 gap-2 max-h-56 overflow-y-auto">
                       {igPosts.map((p) => (
@@ -978,7 +984,7 @@ export default function MarketingCampaignDetail() {
 
               {creativeKind === 'image' && (
                 <div>
-                  <label className="block text-[11px] text-[#666] mb-1">URL da imagem</label>
+                  <label className="block text-[11px] text-[#666] mb-1">{t('URL da imagem', 'Image URL')}</label>
                   <input
                     value={creativeImageUrl}
                     onChange={(e) => setCreativeImageUrl(e.target.value)}
@@ -990,7 +996,7 @@ export default function MarketingCampaignDetail() {
 
               {creativeKind === 'video' && (
                 <div>
-                  <label className="block text-[11px] text-[#666] mb-1">Arquivo de vídeo</label>
+                  <label className="block text-[11px] text-[#666] mb-1">{t('Arquivo de vídeo', 'Video file')}</label>
                   <input
                     type="file"
                     accept="video/*"
@@ -1002,19 +1008,19 @@ export default function MarketingCampaignDetail() {
 
               {creativeKind === 'carousel' && (
                 <div className="space-y-2">
-                  <label className="block text-[11px] text-[#666]">Itens do carrossel (mín. 2)</label>
+                  <label className="block text-[11px] text-[#666]">{t('Itens do carrossel (mín. 2)', 'Carousel items (min. 2)')}</label>
                   {carouselItems.map((item, i) => (
                     <div key={i} className="bg-[#0a0a0f] border border-white/[0.06] rounded-lg p-3 space-y-1.5">
                       <input
                         value={item.image_url}
                         onChange={(e) => setCarouselItems((prev) => prev.map((x, j) => (j === i ? { ...x, image_url: e.target.value } : x)))}
-                        placeholder={`Imagem ${i + 1} — URL`}
+                        placeholder={t(`Imagem ${i + 1} — URL`, `Image ${i + 1} — URL`)}
                         className="w-full px-2.5 py-1.5 bg-[#111118] border border-white/[0.06] text-[#e2e2e8] text-xs rounded-md focus:border-indigo-500 focus:outline-none"
                       />
                       <input
                         value={item.message}
                         onChange={(e) => setCarouselItems((prev) => prev.map((x, j) => (j === i ? { ...x, message: e.target.value } : x)))}
-                        placeholder="Título do card"
+                        placeholder={t('Título do card', 'Card title')}
                         className="w-full px-2.5 py-1.5 bg-[#111118] border border-white/[0.06] text-[#e2e2e8] text-xs rounded-md focus:border-indigo-500 focus:outline-none"
                       />
                     </div>
@@ -1026,7 +1032,7 @@ export default function MarketingCampaignDetail() {
                         onClick={() => setCarouselItems((prev) => [...prev, { image_url: '', link_url: '', message: '' }])}
                         className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300"
                       >
-                        <Plus size={12} /> Adicionar item
+                        <Plus size={12} /> {t('Adicionar item', 'Add item')}
                       </button>
                     )}
                     {carouselItems.length > 2 && (
@@ -1035,7 +1041,7 @@ export default function MarketingCampaignDetail() {
                         onClick={() => setCarouselItems((prev) => prev.slice(0, -1))}
                         className="flex items-center gap-1 text-[11px] text-[#5a5a6e] hover:text-red-400"
                       >
-                        <Trash2 size={12} /> Remover último
+                        <Trash2 size={12} /> {t('Remover último', 'Remove last')}
                       </button>
                     )}
                   </div>
@@ -1048,7 +1054,7 @@ export default function MarketingCampaignDetail() {
                   onClick={() => setShowAdModal(null)}
                   className="flex-1 py-2.5 border border-white/[0.08] text-[#666] hover:text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  Cancelar
+                  {t('Cancelar', 'Cancel')}
                 </button>
                 <button
                   type="button"
@@ -1056,10 +1062,10 @@ export default function MarketingCampaignDetail() {
                   disabled={!adFormValid || creatingAd}
                   className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
                 >
-                  {adModalStep === 'uploading' ? 'Enviando vídeo…'
-                    : adModalStep === 'creating_creative' ? 'Criando criativo…'
-                    : adModalStep === 'creating_ad' ? 'Criando anúncio…'
-                    : 'Criar anúncio'}
+                  {adModalStep === 'uploading' ? t('Enviando vídeo…', 'Uploading video…')
+                    : adModalStep === 'creating_creative' ? t('Criando criativo…', 'Creating creative…')
+                    : adModalStep === 'creating_ad' ? t('Criando anúncio…', 'Creating ad…')
+                    : t('Criar anúncio', 'Create Ad')}
                 </button>
               </div>
             </div>

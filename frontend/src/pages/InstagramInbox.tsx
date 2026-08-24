@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Bot, Clock, UserCheck, Send, Power, Camera as InstagramIcon, Check, CheckCheck, Download } from 'lucide-react'
 import api, { WS_BASE } from '../services/api'
+import { useLang } from '../hooks/useLang'
 
 interface Conversation {
   id: string
@@ -40,22 +41,25 @@ interface Message {
 // bot conversacional aqui (isso é do WhatsApp). Filas: Espera e Minhas.
 type Queue = 'espera' | 'minhas'
 
-const QUEUES: { id: Queue; label: string; icon: typeof Bot; color: string }[] = [
-  { id: 'espera', label: 'Espera', icon: Clock, color: 'text-amber-400' },
-  { id: 'minhas', label: 'Minhas', icon: UserCheck, color: 'text-indigo-400' },
-]
+function getQueues(t: (pt: string, en: string) => string): { id: Queue; label: string; icon: typeof Bot; color: string }[] {
+  return [
+    { id: 'espera', label: t('Espera', 'Waiting'), icon: Clock, color: 'text-amber-400' },
+    { id: 'minhas', label: t('Minhas', 'Mine'), icon: UserCheck, color: 'text-indigo-400' },
+  ]
+}
 
-function fmtTime(iso: string): string {
+function fmtTime(iso: string, locale: string): string {
   const d = new Date(iso)
-  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 }
 
 function MsgStatus({ status, error }: { status: string; error?: string }) {
+  const { t } = useLang()
   if (status === 'read') return <CheckCheck size={13} className="text-sky-400" />
   if (status === 'failed')
     return (
-      <span className="text-red-400 text-[10px]" title={error || 'Falha no envio'}>
-        falhou
+      <span className="text-red-400 text-[10px]" title={error || t('Falha no envio', 'Failed to send')}>
+        {t('falhou', 'failed')}
       </span>
     )
   return <Check size={13} className="text-white/40" />
@@ -63,6 +67,7 @@ function MsgStatus({ status, error }: { status: string; error?: string }) {
 
 /** Mídia do Instagram: a Graph API já devolve URLs públicas, sem proxy necessário. */
 function MediaContent({ m }: { m: Message }) {
+  const { t } = useLang()
   if (!m.media_url) return null
   switch (m.media_type) {
     case 'image':
@@ -80,13 +85,15 @@ function MediaContent({ m }: { m: Message }) {
           className="flex items-center gap-2 text-[12px] underline decoration-white/30 hover:decoration-white"
         >
           <Download size={14} />
-          Baixar anexo
+          {t('Baixar anexo', 'Download attachment')}
         </a>
       )
   }
 }
 
 export default function InstagramInbox() {
+  const { t } = useLang()
+  const QUEUES = getQueues(t)
   const myId = localStorage.getItem('user_id') || ''
 
   const [convs, setConvs] = useState<Conversation[]>([])
@@ -189,20 +196,20 @@ export default function InstagramInbox() {
   }, [loadConvs])
 
   async function sendReply() {
-    const t = text.trim()
-    if (!t || !selected || sending) return
+    const msg = text.trim()
+    if (!msg || !selected || sending) return
     setSending(true)
     setText('')
     try {
       const { data } = await api.post(`/conversations/${selected.id}/messages`, {
-        text: t,
+        text: msg,
         direction: 'outbound',
       })
       setMessages((prev) => (prev.some((m) => m.id === data.id) ? prev : [...prev, data]))
       loadConvs()
     } catch (err: any) {
-      setText(t)
-      alert(err.response?.data?.detail || 'Erro ao enviar mensagem.')
+      setText(msg)
+      alert(err.response?.data?.detail || t('Erro ao enviar mensagem.', 'Error sending message.'))
     } finally {
       setSending(false)
     }
@@ -268,7 +275,7 @@ export default function InstagramInbox() {
         <div className="flex-1 overflow-y-auto">
           {visible.length === 0 ? (
             <div className="p-6 text-center text-[#4a4a5a] text-xs mt-8">
-              Nenhuma conversa nesta fila.
+              {t('Nenhuma conversa nesta fila.', 'No conversations in this queue.')}
             </div>
           ) : (
             visible.map((c) => {
@@ -286,7 +293,7 @@ export default function InstagramInbox() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-medium text-[#e2e2e8] truncate">
-                      {c.customer_name || 'Sem nome'}
+                      {c.customer_name || t('Sem nome', 'No name')}
                     </p>
                     <p className="text-[11px] text-[#5a5a6e] truncate">{c.atendimento_status}</p>
                   </div>
@@ -309,9 +316,9 @@ export default function InstagramInbox() {
             <div className="w-16 h-16 rounded-2xl bg-pink-500/10 flex items-center justify-center mb-4">
               <InstagramIcon size={28} className="text-pink-400/70" />
             </div>
-            <p className="text-[#e2e2e8] font-medium mb-1">Selecione uma conversa</p>
+            <p className="text-[#e2e2e8] font-medium mb-1">{t('Selecione uma conversa', 'Select a conversation')}</p>
             <p className="text-[#5a5a6e] text-sm max-w-xs">
-              As conversas aparecem aqui quando alguém manda DM no Instagram.
+              {t('As conversas aparecem aqui quando alguém manda DM no Instagram.', 'Conversations appear here when someone sends a DM on Instagram.')}
             </p>
           </div>
         ) : (
@@ -323,7 +330,7 @@ export default function InstagramInbox() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-[#e2e2e8] truncate">
-                  {selected.customer_name || 'Sem nome'}
+                  {selected.customer_name || t('Sem nome', 'No name')}
                 </p>
                 <p className="text-[11px] text-[#5a5a6e]">{selected.atendimento_status}</p>
               </div>
@@ -334,13 +341,13 @@ export default function InstagramInbox() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white text-xs font-semibold transition-colors"
                 >
                   <UserCheck size={13} />
-                  Assumir
+                  {t('Assumir', 'Take over')}
                 </button>
               )}
 
               <button
                 onClick={toggleBot}
-                title={selected.bot_active ? 'Bot ligado — clique para desligar' : 'Bot desligado — clique para ligar'}
+                title={selected.bot_active ? t('Bot ligado — clique para desligar', 'Bot on — click to turn off') : t('Bot desligado — clique para ligar', 'Bot off — click to turn on')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border ${
                   selected.bot_active
                     ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
@@ -355,9 +362,9 @@ export default function InstagramInbox() {
             {/* Thread */}
             <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
               {loadingMsgs ? (
-                <p className="text-center text-[#4a4a5a] text-xs mt-8">Carregando…</p>
+                <p className="text-center text-[#4a4a5a] text-xs mt-8">{t('Carregando…', 'Loading…')}</p>
               ) : messages.length === 0 ? (
-                <p className="text-center text-[#4a4a5a] text-xs mt-8">Nenhuma mensagem ainda.</p>
+                <p className="text-center text-[#4a4a5a] text-xs mt-8">{t('Nenhuma mensagem ainda.', 'No messages yet.')}</p>
               ) : (
                 messages.map((m) => {
                   const out = m.direction === 'outbound'
@@ -384,7 +391,7 @@ export default function InstagramInbox() {
                             <p className="text-[13px] whitespace-pre-wrap break-words">{m.text}</p>
                           )}
                           <div className={`flex items-center gap-1 justify-end mt-0.5 ${out ? 'text-white/60' : 'text-[#5a5a6e]'}`}>
-                            <span className="text-[10px]">{fmtTime(m.created_at)}</span>
+                            <span className="text-[10px]">{fmtTime(m.created_at, t('pt-BR', 'en-US'))}</span>
                             {out && <MsgStatus status={m.status} error={m.payload?.error} />}
                           </div>
                         </div>
@@ -407,8 +414,10 @@ export default function InstagramInbox() {
             {hoursSinceLastInbound !== null && hoursSinceLastInbound > 24 && (
               <div className="mx-3 mb-2 bg-amber-900/15 border border-amber-500/20 rounded-xl px-4 py-2.5">
                 <p className="text-amber-400/90 text-[12px]">
-                  O cliente não responde há mais de 24h — o envio pode ser recusado pela Meta
-                  fora da janela de atendimento padrão do Instagram.
+                  {t(
+                    'O cliente não responde há mais de 24h — o envio pode ser recusado pela Meta fora da janela de atendimento padrão do Instagram.',
+                    'The customer has not replied in over 24h — sending may be rejected by Meta outside Instagram\'s standard messaging window.',
+                  )}
                 </p>
               </div>
             )}
@@ -423,7 +432,7 @@ export default function InstagramInbox() {
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply() }
                   }}
                   rows={1}
-                  placeholder="Escreva uma mensagem…  (Enter envia, Shift+Enter quebra linha)"
+                  placeholder={t('Escreva uma mensagem…  (Enter envia, Shift+Enter quebra linha)', 'Write a message…  (Enter to send, Shift+Enter for new line)')}
                   className="flex-1 resize-none max-h-32 px-3.5 py-2.5 bg-[#0a0a0f] border border-white/[0.08] text-[#e2e2e8] text-[13px] rounded-xl outline-none focus:border-pink-500/60 placeholder-[#3a3a4a]"
                 />
                 <button

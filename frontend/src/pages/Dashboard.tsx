@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../services/api'
 import type { DashboardData } from '../types'
+import { useLang } from '../hooks/useLang'
 
 const palette = {
   green: { bg: 'rgba(35,134,54,0.15)', text: '#3fb950' },
@@ -90,6 +91,7 @@ function CardsGrid({ children, minWidth = 160 }: { children: React.ReactNode; mi
 }
 
 function CreditCard({ remaining, total }: { remaining: number; total: number }) {
+  const { t } = useLang()
   const pct = total > 0 ? Math.round((remaining / total) * 100) : 0
   return (
     <div className="bg-[#111118] border border-white/[0.06] rounded-xl p-4 hover:border-white/[0.12] transition-colors">
@@ -98,11 +100,11 @@ function CreditCard({ remaining, total }: { remaining: number; total: number }) 
         <Icon d="M12 12m-9 0a9 9 0 1 0 18 0 9 9 0 0 0-18 0zM14.8 9A2 2 0 0 0 13 8h-2a2 2 0 0 0 0 4h2a2 2 0 0 1 0 4h-2a2 2 0 0 1-1.8-1M12 7v1m0 8v1" size={17} />
       </div>
       <div className="text-xl font-semibold text-green-400 leading-tight mb-0.5">{remaining}</div>
-      <div className="text-xs text-[#555] mb-2.5">Créditos Restantes</div>
+      <div className="text-xs text-[#555] mb-2.5">{t('Créditos Restantes', 'Remaining Credits')}</div>
       <div className="h-1 bg-white/[0.06] rounded-full">
         <div className="h-full rounded-full bg-green-400" style={{ width: `${pct}%` }} />
       </div>
-      <div className="text-[10px] text-[#444] mt-1">{remaining}/{total} disponíveis</div>
+      <div className="text-[10px] text-[#444] mt-1">{remaining}/{total} {t('disponíveis', 'available')}</div>
     </div>
   )
 }
@@ -118,6 +120,7 @@ const emptyData: DashboardData = {
 }
 
 export default function Dashboard() {
+  const { t } = useLang()
   const [data, setData] = useState<DashboardData>(emptyData)
   const [period, setPeriod] = useState('30d')
   const [waCosts, setWaCosts] = useState<{
@@ -160,11 +163,11 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <SectionLabel>Anúncios</SectionLabel>
+      <SectionLabel>{t('Anúncios', 'Ads')}</SectionLabel>
       <CardsGrid>
-        <MetricCard icon="dollar" iconColor="green" value={`R$ ${data.ads_spent.toFixed(2)}`} label="Investimento Total" trend="neutral" />
-        <MetricCard icon="eye" iconColor="purple" value={data.ads_impressions} label="Impressões" trend="neutral" />
-        <MetricCard icon="cursor" iconColor="blue" value={data.ads_clicks} label="Cliques" trend="neutral" />
+        <MetricCard icon="dollar" iconColor="green" value={`R$ ${data.ads_spent.toFixed(2)}`} label={t('Investimento Total', 'Total Spend')} trend="neutral" />
+        <MetricCard icon="eye" iconColor="purple" value={data.ads_impressions} label={t('Impressões', 'Impressions')} trend="neutral" />
+        <MetricCard icon="cursor" iconColor="blue" value={data.ads_clicks} label={t('Cliques', 'Clicks')} trend="neutral" />
         <MetricCard icon="percent" iconColor="teal" value={`${data.ads_ctr.toFixed(2)}%`} label="CTR" trend="neutral" />
         <MetricCard icon="chartLine" iconColor="orange" value={`R$ ${data.ads_cpm.toFixed(2)}`} label="CPM" trend="neutral" />
         <MetricCard icon="target" iconColor="pink" value={`${data.ads_roas.toFixed(2)}x`} label="ROAS" trend="neutral" />
@@ -172,49 +175,49 @@ export default function Dashboard() {
 
       <SectionLabel>Instagram</SectionLabel>
       <CardsGrid minWidth={140}>
-        <MetricCard icon="photo" iconColor="pink" value={data.instagram_posts} label="Posts (30 dias)" />
-        <MetricCard icon="users" iconColor="purple" value={data.instagram_reach} label="Alcance Total" />
-        <MetricCard icon="heart" iconColor="red" value={data.instagram_engagement} label="Engajamento Médio" />
-        <MetricCard icon="userPlus" iconColor="orange" value={data.instagram_followers_delta} label="Seguidores" />
+        <MetricCard icon="photo" iconColor="pink" value={data.instagram_posts} label={t('Posts (30 dias)', 'Posts (30 days)')} />
+        <MetricCard icon="users" iconColor="purple" value={data.instagram_reach} label={t('Alcance Total', 'Total Reach')} />
+        <MetricCard icon="heart" iconColor="red" value={data.instagram_engagement} label={t('Engajamento Médio', 'Average Engagement')} />
+        <MetricCard icon="userPlus" iconColor="orange" value={data.instagram_followers_delta} label={t('Seguidores', 'Followers')} />
       </CardsGrid>
 
-      <SectionLabel>Vídeos Gerados</SectionLabel>
+      <SectionLabel>{t('Vídeos Gerados', 'Generated Videos')}</SectionLabel>
       <CardsGrid minWidth={140}>
-        <MetricCard icon="video" iconColor="blue" value={data.videos_generated_month} label="Vídeos no Mês" />
+        <MetricCard icon="video" iconColor="blue" value={data.videos_generated_month} label={t('Vídeos no Mês', 'Videos This Month')} />
         <CreditCard remaining={creditsRemaining} total={data.credits_total} />
-        <MetricCard icon="donut" iconColor="indigo" value={`${creditsPercent}%`} label="Créditos Usados" sub={`${data.credits_used} / ${data.credits_total}`} />
-        <MetricCard icon="play" iconColor="teal" value={data.last_video_title || 'Nenhum'} label="Último Vídeo" sub={data.last_video_created_at ? new Date(data.last_video_created_at).toLocaleDateString('pt-BR') : ''} />
+        <MetricCard icon="donut" iconColor="indigo" value={`${creditsPercent}%`} label={t('Créditos Usados', 'Credits Used')} sub={`${data.credits_used} / ${data.credits_total}`} />
+        <MetricCard icon="play" iconColor="teal" value={data.last_video_title || t('Nenhum', 'None')} label={t('Último Vídeo', 'Last Video')} sub={data.last_video_created_at ? new Date(data.last_video_created_at).toLocaleDateString(t('pt-BR', 'en-US')) : ''} />
       </CardsGrid>
 
       {waCosts && (
         <>
-          <SectionLabel>WhatsApp — Custo do mês</SectionLabel>
+          <SectionLabel>{t('WhatsApp — Custo do mês', 'WhatsApp — Monthly Cost')}</SectionLabel>
           <CardsGrid minWidth={140}>
-            <MetricCard icon="coins" iconColor="green" value={`R$ ${waCosts.total.toFixed(2)}`} label="Custo total (mês)" />
-            <MetricCard icon="receipt" iconColor="blue" value={`R$ ${(waCosts.breakdown.utility?.subtotal ?? 0).toFixed(2)}`} label="Utilidade" sub={`${waCosts.breakdown.utility?.count ?? 0} conversas`} />
-            <MetricCard icon="receipt" iconColor="purple" value={`R$ ${(waCosts.breakdown.marketing?.subtotal ?? 0).toFixed(2)}`} label="Marketing" sub={`${waCosts.breakdown.marketing?.count ?? 0} conversas`} />
-            <MetricCard icon="receipt" iconColor="orange" value={`R$ ${(waCosts.breakdown.authentication?.subtotal ?? 0).toFixed(2)}`} label="Autenticação" sub={`${waCosts.breakdown.authentication?.count ?? 0} conversas`} />
+            <MetricCard icon="coins" iconColor="green" value={`R$ ${waCosts.total.toFixed(2)}`} label={t('Custo total (mês)', 'Total cost (month)')} />
+            <MetricCard icon="receipt" iconColor="blue" value={`R$ ${(waCosts.breakdown.utility?.subtotal ?? 0).toFixed(2)}`} label={t('Utilidade', 'Utility')} sub={t(`${waCosts.breakdown.utility?.count ?? 0} conversas`, `${waCosts.breakdown.utility?.count ?? 0} conversations`)} />
+            <MetricCard icon="receipt" iconColor="purple" value={`R$ ${(waCosts.breakdown.marketing?.subtotal ?? 0).toFixed(2)}`} label="Marketing" sub={t(`${waCosts.breakdown.marketing?.count ?? 0} conversas`, `${waCosts.breakdown.marketing?.count ?? 0} conversations`)} />
+            <MetricCard icon="receipt" iconColor="orange" value={`R$ ${(waCosts.breakdown.authentication?.subtotal ?? 0).toFixed(2)}`} label={t('Autenticação', 'Authentication')} sub={t(`${waCosts.breakdown.authentication?.count ?? 0} conversas`, `${waCosts.breakdown.authentication?.count ?? 0} conversations`)} />
           </CardsGrid>
         </>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <SectionLabel>Clientes</SectionLabel>
+          <SectionLabel>{t('Clientes', 'Clients')}</SectionLabel>
           <div className="grid grid-cols-2 gap-2.5">
-            <MetricCard icon="users" iconColor="blue" value={data.total_customers} label="Total de Clientes" />
-            <MetricCard icon="userPlus" iconColor="green" value={data.new_customers_30d} label="Novos (30 dias)" />
-            <MetricCard icon="target" iconColor="indigo" value={`${data.conversion_rate}%`} label="Taxa de Conversão" />
-            <MetricCard icon="magnet" iconColor="orange" value={data.total_leads} label="Leads Captados" />
+            <MetricCard icon="users" iconColor="blue" value={data.total_customers} label={t('Total de Clientes', 'Total Clients')} />
+            <MetricCard icon="userPlus" iconColor="green" value={data.new_customers_30d} label={t('Novos (30 dias)', 'New (30 days)')} />
+            <MetricCard icon="target" iconColor="indigo" value={`${data.conversion_rate}%`} label={t('Taxa de Conversão', 'Conversion Rate')} />
+            <MetricCard icon="magnet" iconColor="orange" value={data.total_leads} label={t('Leads Captados', 'Leads Captured')} />
           </div>
         </div>
         <div>
-          <SectionLabel>Faturamento</SectionLabel>
+          <SectionLabel>{t('Faturamento', 'Revenue')}</SectionLabel>
           <div className="grid grid-cols-2 gap-2.5">
-            <MetricCard icon="dollar" iconColor="green" value={`R$ ${data.total_revenue.toFixed(2)}`} label="Faturamento Total" />
-            <MetricCard icon="calStats" iconColor="teal" value={`R$ ${data.monthly_revenue.toFixed(2)}`} label="Faturamento (mês)" />
-            <MetricCard icon="receipt" iconColor="purple" value={`R$ ${data.average_ticket.toFixed(2)}`} label="Ticket Médio" />
-            <MetricCard icon="trending" iconColor="orange" value={`R$ ${data.projected_revenue.toFixed(2)}`} label="Receita Projetada" />
+            <MetricCard icon="dollar" iconColor="green" value={`R$ ${data.total_revenue.toFixed(2)}`} label={t('Faturamento Total', 'Total Revenue')} />
+            <MetricCard icon="calStats" iconColor="teal" value={`R$ ${data.monthly_revenue.toFixed(2)}`} label={t('Faturamento (mês)', 'Revenue (month)')} />
+            <MetricCard icon="receipt" iconColor="purple" value={`R$ ${data.average_ticket.toFixed(2)}`} label={t('Ticket Médio', 'Average Ticket')} />
+            <MetricCard icon="trending" iconColor="orange" value={`R$ ${data.projected_revenue.toFixed(2)}`} label={t('Receita Projetada', 'Projected Revenue')} />
           </div>
         </div>
       </div>
