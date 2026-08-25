@@ -91,9 +91,18 @@ function MediaContent({ m }: { m: Message }) {
   }
 }
 
+function getAtendimentoStatusLabel(t: (pt: string, en: string) => string): Record<string, string> {
+  return {
+    aberto: t('Aberto', 'Open'),
+    em_atendimento: t('Em atendimento', 'In service'),
+    aguardando: t('Aguardando', 'Waiting'),
+  }
+}
+
 export default function InstagramInbox() {
   const { t } = useLang()
   const QUEUES = getQueues(t)
+  const atendimentoStatusLabel = getAtendimentoStatusLabel(t)
   const myId = localStorage.getItem('user_id') || ''
 
   const [convs, setConvs] = useState<Conversation[]>([])
@@ -295,7 +304,7 @@ export default function InstagramInbox() {
                     <p className="text-[13px] font-medium text-[#e2e2e8] truncate">
                       {c.customer_name || t('Sem nome', 'No name')}
                     </p>
-                    <p className="text-[11px] text-[#5a5a6e] truncate">{c.atendimento_status}</p>
+                    <p className="text-[11px] text-[#5a5a6e] truncate">{atendimentoStatusLabel[c.atendimento_status] || c.atendimento_status}</p>
                   </div>
                   {c.unread_count > 0 && (
                     <span className="bg-pink-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 shrink-0">
@@ -332,7 +341,7 @@ export default function InstagramInbox() {
                 <p className="text-sm font-medium text-[#e2e2e8] truncate">
                   {selected.customer_name || t('Sem nome', 'No name')}
                 </p>
-                <p className="text-[11px] text-[#5a5a6e]">{selected.atendimento_status}</p>
+                <p className="text-[11px] text-[#5a5a6e]">{atendimentoStatusLabel[selected.atendimento_status] || selected.atendimento_status}</p>
               </div>
 
               {selected.atendente_id !== myId && (
